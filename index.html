@@ -3,51 +3,130 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Meine Aufgaben</title>
-  <meta name="description" content="Einfache Aufgaben-App, die offline funktioniert.">
-  <meta name="theme-color" content="#4f46e5">
+  <title>Fahrtenbuch</title>
+  <meta name="description" content="Fahrtenbuch für den Fernverkehr, funktioniert offline.">
+  <meta name="theme-color" content="#1d4ed8">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Aufgaben">
+  <meta name="apple-mobile-web-app-title" content="Fahrtenbuch">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="top">
-    <div>
-      <h1>Meine Aufgaben</h1>
-      <p id="summary" class="summary"></p>
+    <h1>Fahrtenbuch</h1>
+    <div class="top-actions">
+      <button id="installBtn" class="pill" hidden>Installieren</button>
+      <button id="menuBtn" class="icon-btn" aria-label="Menü">⋮</button>
     </div>
-    <button id="installBtn" class="install" hidden>Installieren</button>
   </header>
 
   <main>
-    <form id="addForm" class="add" autocomplete="off">
-      <input id="taskInput" type="text" placeholder="Neue Aufgabe …" maxlength="200" required>
-      <input id="dueInput" type="date" aria-label="Fällig am">
-      <button type="submit" aria-label="Hinzufügen">+</button>
-    </form>
+    <section class="stats" aria-label="Dieser Monat">
+      <div><span id="statKm" class="num">0</span><span class="lbl">km diesen Monat</span></div>
+      <div><span id="statTrips" class="num">0</span><span class="lbl">Fahrten</span></div>
+      <div><span id="statHours" class="num">0:00</span><span class="lbl">Stunden</span></div>
+    </section>
 
-    <nav class="filters" role="tablist">
-      <button data-filter="all" class="active">Alle</button>
-      <button data-filter="open">Offen</button>
-      <button data-filter="done">Erledigt</button>
-    </nav>
+    <section id="activeCard" class="active-card" hidden>
+      <div class="active-head"><span class="dot"></span> Fahrt läuft</div>
+      <div id="activeRoute" class="active-route"></div>
+      <div id="activeInfo" class="active-info"></div>
+      <button id="endTripBtn" class="primary big">Fahrt beenden</button>
+    </section>
 
-    <ul id="list" class="list"></ul>
-    <p id="empty" class="empty" hidden>Keine Aufgaben hier. 🎉</p>
+    <button id="startTripBtn" class="primary big">▶ Fahrt starten</button>
+    <button id="addTripBtn" class="secondary">+ Fahrt nachtragen</button>
 
-    <button id="clearDone" class="clear" hidden>Erledigte löschen</button>
+    <div id="list"></div>
+    <p id="empty" class="empty">Noch keine Fahrten eingetragen.</p>
   </main>
+
+  <!-- Fahrt bearbeiten -->
+  <dialog id="tripDialog">
+    <form id="tripForm" method="dialog" novalidate>
+      <h2 id="tripTitle">Fahrt</h2>
+
+      <label>Kennzeichen
+        <input name="plate" type="text" autocapitalize="characters" placeholder="z. B. B-XY 1234" maxlength="20">
+      </label>
+
+      <div class="row">
+        <label>Startort
+          <input name="from" type="text" placeholder="z. B. Hamburg" maxlength="80" required>
+        </label>
+        <label>Zielort
+          <input name="to" type="text" placeholder="z. B. München" maxlength="80">
+        </label>
+      </div>
+
+      <div class="row">
+        <label>Abfahrt
+          <input name="start" type="datetime-local" required>
+        </label>
+        <label>Ankunft
+          <input name="end" type="datetime-local">
+        </label>
+      </div>
+
+      <div class="row">
+        <label>km-Stand Start
+          <input name="kmStart" type="number" inputmode="numeric" min="0" step="1" required>
+        </label>
+        <label>km-Stand Ende
+          <input name="kmEnd" type="number" inputmode="numeric" min="0" step="1">
+        </label>
+      </div>
+
+      <label>Auftrag / Kunde
+        <input name="order" type="text" placeholder="z. B. Auftragsnr. oder Kunde" maxlength="80">
+      </label>
+
+      <label>Notiz
+        <textarea name="note" rows="2" maxlength="500" placeholder="z. B. Ladung, Stau, Pausenort"></textarea>
+      </label>
+
+      <p id="formError" class="error" hidden></p>
+
+      <div class="dialog-actions">
+        <button type="button" id="deleteTripBtn" class="danger" hidden>Löschen</button>
+        <span class="spacer"></span>
+        <button type="button" id="cancelBtn" class="secondary">Abbrechen</button>
+        <button type="submit" class="primary">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Menü -->
+  <dialog id="menuDialog">
+    <h2>Menü</h2>
+    <label>Name des Fahrers (für den Export)
+      <input id="driverName" type="text" maxlength="60">
+    </label>
+    <div class="menu-list">
+      <button id="exportCsvBtn" class="secondary">Als Tabelle exportieren (CSV, für Excel)</button>
+      <button id="backupBtn" class="secondary">Datensicherung speichern</button>
+      <label class="secondary file-btn">Datensicherung laden
+        <input id="restoreInput" type="file" accept="application/json,.json" hidden>
+      </label>
+    </div>
+    <p class="hint">Die Daten liegen nur auf diesem Gerät. Speichere ab und zu eine Datensicherung.</p>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button id="menuClose" class="primary">Fertig</button>
+    </div>
+  </dialog>
 
   <div id="iosHint" class="ios-hint" hidden>
     Zum Installieren: Tippe auf <strong>Teilen</strong> <span aria-hidden="true">⬆︎</span> und dann auf
     <strong>„Zum Home-Bildschirm“</strong>.
     <button id="iosHintClose" aria-label="Schließen">×</button>
   </div>
+
+  <div id="toast" class="toast" hidden></div>
 
   <script src="app.js"></script>
 </body>

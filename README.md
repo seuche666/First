@@ -1,12 +1,24 @@
-# Meine Aufgaben – Handy-App (PWA)
+# Fahrtenbuch – Handy-App für den Fernverkehr (PWA)
 
-Eine kleine Aufgaben-App als **Progressive Web App**. Du installierst sie direkt aus dem Browser
-auf den Startbildschirm, ohne App Store. Danach startet sie wie eine normale App im Vollbild
-und funktioniert auch **offline**.
+Ein Fahrtenbuch als **Progressive Web App**. Du installierst es direkt aus dem Browser auf den
+Startbildschirm, ohne App Store. Danach startet es wie eine normale App im Vollbild und
+funktioniert auch **offline**, also auch ohne Netz unterwegs.
 
-**Funktionen:** Aufgaben anlegen, mit Fälligkeitsdatum versehen, abhaken und löschen;
-Filter (Alle / Offen / Erledigt); überfällige Aufgaben werden markiert; automatischer Dark Mode.
-Die Daten bleiben nur auf deinem Gerät (im Browser-Speicher).
+**Funktionen**
+
+- **Fahrt starten / beenden** mit einem Tipp: Uhrzeit wird automatisch eingetragen, Startort,
+  km-Stand und Kennzeichen werden von der letzten Fahrt übernommen.
+- **Fahrt nachtragen** und jede Fahrt nachträglich bearbeiten oder löschen.
+- Pro Fahrt: Kennzeichen, Start- und Zielort, Abfahrt und Ankunft (auch über Nacht),
+  km-Stand Start/Ende, Auftrag/Kunde, Notiz.
+- Automatisch berechnet: gefahrene km und Fahrtdauer.
+- Monatsübersicht (km, Fahrten, Stunden) und Liste nach Monaten gruppiert.
+- **Export als CSV-Tabelle** (öffnet direkt in Excel) mit Fahrername.
+- **Datensicherung** speichern und wieder laden.
+- Automatischer Dark Mode.
+
+Die Daten bleiben nur auf deinem Gerät (im Browser-Speicher). Speichere deshalb regelmäßig eine
+Datensicherung über das Menü ⋮.
 
 ## Auf dem Handy installieren
 
@@ -34,10 +46,10 @@ Danach <http://localhost:8000> im Browser öffnen.
 |---|---|
 | `index.html` | Oberfläche |
 | `styles.css` | Design (hell und dunkel) |
-| `app.js` | Logik, Speichern, Installations-Button |
+| `app.js` | Logik, Speichern, Export, Installations-Button |
 | `manifest.webmanifest` | Name, Icons, Vollbild: macht die Seite installierbar |
 | `sw.js` | Service Worker für den Offline-Betrieb |
 | `icons/` | App-Icons |
 
-Wenn du die App änderst, erhöhe in `sw.js` die Versionsnummer (`aufgaben-v1` → `aufgaben-v2`),
+Wenn du die App änderst, erhöhe in `sw.js` die Versionsnummer (z. B. `fahrtenbuch-v2` → `fahrtenbuch-v3`),
 damit die installierten Apps die neue Version laden.

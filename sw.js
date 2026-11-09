@@ -1,6 +1,6 @@
 // Service Worker: speichert die App-Dateien, damit sie auch offline startet.
 // Bei Änderungen an der App die Versionsnummer erhöhen.
-const CACHE = 'aufgaben-v1';
+const CACHE = 'fahrtenbuch-v2';
 const ASSETS = [
   './',
   'index.html',

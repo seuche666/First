@@ -42,17 +42,31 @@ signierte APK und stellt sie als **Release** bereit:
 
 ## Signierung
 
-Damit sich jede neue Version als Update über die alte installieren lässt, wird jede APK mit
-demselben Schlüssel signiert.
+Jede APK wird mit demselben **geheimen** Schlüssel signiert, damit sich neue Versionen als Update
+installieren lassen. Der Schlüssel liegt **nicht** im Repository, sondern in zwei GitHub-Secrets
+(`Settings → Secrets and variables → Actions → Repository secrets`):
 
-- **Standard:** der mitgelieferte Schlüssel `app/signing/fahrtenbuch-release.jks` (Passwort `fahrtenbuch`).
-  Er liegt öffentlich im Repository. Das ist bequem, aber theoretisch könnte damit jeder eine APK
-  signieren, die dein Handy als Update akzeptiert. Installiere deshalb nur APKs aus deinen eigenen Releases.
-- **Sicherer:** eigener Schlüssel als GitHub-Secrets (`Settings → Secrets and variables → Actions`):
-  `SIGNING_KEYSTORE_BASE64` (Keystore als Base64), `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`,
-  `SIGNING_KEY_PASSWORD`. Der Workflow nutzt sie automatisch, sobald sie gesetzt sind.
-  **Achtung:** Nach einem Schlüsselwechsel muss die App einmal deinstalliert und neu installiert werden.
-  Vorher unbedingt eine Datensicherung speichern!
+| Secret | Inhalt |
+|---|---|
+| `SIGNING_KEYSTORE_BASE64` | Die Keystore-Datei (`.jks`) als Base64-Text |
+| `SIGNING_PASSWORD` | Passwort des Keystores (gleichzeitig Passwort des Schlüssels) |
+
+Der Schlüssel-Alias ist `fahrtenbuch`.
+
+- Bei einem Merge auf `main` **ohne** diese Secrets bricht der Workflow mit einer Fehlermeldung ab.
+  Es wird nie eine unsignierte App veröffentlicht.
+- Bei Pull Requests ohne Secrets wird nur eine unsignierte Test-APK gebaut.
+- **Bewahre Keystore und Passwort sicher auf** (z. B. im Passwort-Manager). Gehen sie verloren,
+  lässt sich die App nicht mehr aktualisieren, sondern nur deinstallieren und neu installieren.
+- Ein früherer Schlüssel lag öffentlich in `app/signing/`. Er wurde entfernt und darf nicht mehr
+  verwendet werden. Mit ihm signierte Versionen (bis 1.0.2) müssen einmal deinstalliert werden,
+  bevor die neue Version installiert werden kann. Vorher eine Datensicherung speichern!
+
+Lokal signiert bauen:
+
+```bash
+SIGNING_KEYSTORE_PATH=/pfad/zum/keystore.jks SIGNING_PASSWORD=… ./gradlew assembleRelease
+```
 
 ## Selbst bauen
 
@@ -61,7 +75,7 @@ Voraussetzungen: JDK 17 oder neuer und das Android SDK (Platform 35).
 ```bash
 cd android
 ./gradlew testDebugUnitTest     # Tests
-./gradlew assembleRelease       # APK: app/build/outputs/apk/release/app-release.apk
+./gradlew assembleRelease       # ohne Signier-Variablen: app-release-unsigned.apk
 ```
 
 ## Aufbau

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Meine Aufgaben</title>
+  <meta name="description" content="Einfache Aufgaben-App, die offline funktioniert.">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Aufgaben">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Meine Aufgaben</h1>
+      <p id="summary" class="summary"></p>
+    </div>
+    <button id="installBtn" class="install" hidden>Installieren</button>
+  </header>
+
+  <main>
+    <form id="addForm" class="add" autocomplete="off">
+      <input id="taskInput" type="text" placeholder="Neue Aufgabe …" maxlength="200" required>
+      <input id="dueInput" type="date" aria-label="Fällig am">
+      <button type="submit" aria-label="Hinzufügen">+</button>
+    </form>
+
+    <nav class="filters" role="tablist">
+      <button data-filter="all" class="active">Alle</button>
+      <button data-filter="open">Offen</button>
+      <button data-filter="done">Erledigt</button>
+    </nav>
+
+    <ul id="list" class="list"></ul>
+    <p id="empty" class="empty" hidden>Keine Aufgaben hier. 🎉</p>
+
+    <button id="clearDone" class="clear" hidden>Erledigte löschen</button>
+  </main>
+
+  <div id="iosHint" class="ios-hint" hidden>
+    Zum Installieren: Tippe auf <strong>Teilen</strong> <span aria-hidden="true">⬆︎</span> und dann auf
+    <strong>„Zum Home-Bildschirm“</strong>.
+    <button id="iosHintClose" aria-label="Schließen">×</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

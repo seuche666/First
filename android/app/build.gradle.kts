@@ -10,9 +10,13 @@ plugins {
 // damit jede neue APK als Update über die alte installiert werden kann.
 val appVersionCode = (findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
 
-// Signierung: Bevorzugt die Werte aus GitHub-Secrets (Umgebungsvariablen),
-// sonst der mitgelieferte Schlüssel in app/signing/ (siehe README).
+// Signierung: Der Schlüssel kommt ausschließlich aus Umgebungsvariablen (in GitHub Actions
+// aus den Repository-Secrets, siehe README). Er liegt NICHT im Repository.
+// Ohne diese Variablen entsteht eine unsignierte Release-APK (nur zum Testen).
 fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+val signingKeystore = env("SIGNING_KEYSTORE_PATH")
+val signingPassword = env("SIGNING_PASSWORD")
+val canSign = signingKeystore != null && signingPassword != null
 
 android {
     namespace = "de.fernfahrer.fahrtenbuch"
@@ -27,11 +31,13 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file(env("SIGNING_KEYSTORE_PATH") ?: "signing/fahrtenbuch-release.jks")
-            storePassword = env("SIGNING_STORE_PASSWORD") ?: "fahrtenbuch"
-            keyAlias = env("SIGNING_KEY_ALIAS") ?: "fahrtenbuch"
-            keyPassword = env("SIGNING_KEY_PASSWORD") ?: "fahrtenbuch"
+        if (canSign) {
+            create("release") {
+                storeFile = file(signingKeystore!!)
+                storePassword = signingPassword
+                keyAlias = env("SIGNING_KEY_ALIAS") ?: "fahrtenbuch"
+                keyPassword = signingPassword
+            }
         }
     }
 
@@ -40,7 +46,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
+            if (canSign) signingConfig = signingConfigs.getByName("release")
         }
     }
 

@@ -1,5 +1,9 @@
 # Fahrtenbuch – Handy-App für den Fernverkehr (PWA)
 
+> **Neu: native Android-App** im Ordner [`android/`](android/README.md): Fahrtenbuch für die
+> Steuererklärung (volle und halbe Tage, Auslandstage je Land, km, PDF/CSV-Export).
+> Die fertige APK gibt es nach jedem Merge unter **Releases**.
+
 Ein Fahrtenbuch als **Progressive Web App**. Du installierst es direkt aus dem Browser auf den
 Startbildschirm, ohne App Store. Danach startet es wie eine normale App im Vollbild und
 funktioniert auch **offline**, also auch ohne Netz unterwegs.

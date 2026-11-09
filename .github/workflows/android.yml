@@ -1,0 +1,93 @@
+name: Android-App bauen
+
+# Bei jedem Merge auf main: APK bauen, signieren und als GitHub-Release bereitstellen.
+# Bei Pull Requests: nur bauen und testen (die APK gibt es dann als Download unter "Artifacts").
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    env:
+      VERSION_NAME: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Optional: eigener Signierschlüssel aus den Repository-Secrets (siehe README).
+      # Ohne Secrets wird der mitgelieferte Schlüssel aus android/app/signing/ verwendet.
+      - name: Signierschlüssel einrichten
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks"
+              echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD"
+              echo "SIGNING_KEY_ALIAS=$KEY_ALIAS"
+              echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "Eigener Signierschlüssel aus den Secrets wird verwendet."
+          else
+            echo "Mitgelieferter Signierschlüssel wird verwendet."
+          fi
+
+      - name: Tests ausführen
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: APK bauen
+        run: ./gradlew --no-daemon assembleRelease -PversionCode=${{ github.run_number }}
+
+      - name: APK umbenennen
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk "out/Fahrtenbuch-$VERSION_NAME.apk"
+
+      - name: APK als Artifact hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fahrtenbuch-${{ env.VERSION_NAME }}
+          path: android/out/*.apk
+
+      - name: GitHub-Release erstellen
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION_NAME" "out/Fahrtenbuch-$VERSION_NAME.apk" \
+            --target "$GITHUB_SHA" \
+            --title "Fahrtenbuch $VERSION_NAME" \
+            --notes "Neue Version der Fahrtenbuch-App.
+
+          **Installieren:** Unten bei *Assets* auf **Fahrtenbuch-$VERSION_NAME.apk** tippen, herunterladen und öffnen.
+          Ein Update wird einfach über die alte Version installiert – deine Daten bleiben erhalten." \
+            --latest

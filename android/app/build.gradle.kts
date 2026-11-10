@@ -60,6 +60,10 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        // Für Robolectric-Tests (Datenbank-Migration, Repository)
+        unitTests.isIncludeAndroidResources = true
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -89,4 +93,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

@@ -43,8 +43,20 @@ data class DayEntity(
     val tourId: Long? = null,
     /** Manuell gesetzte Einordnung; null = automatisch. */
     val dayTypeOverride: DayType? = null,
+    /** Arbeitsbeginn für die Firma (Minuten ab Mitternacht); hat keinen Einfluss auf die Steuer-Einordnung. */
+    val workStartMinute: Int? = null,
+    /** Arbeitsende für die Firma (Minuten ab Mitternacht, 1440 = 24:00). */
+    val workEndMinute: Int? = null,
 ) {
     val absenceMinutes: Int get() = (endMinute - startMinute).coerceAtLeast(0)
+
+    /** Arbeitszeit in Minuten, falls Beginn und Ende erfasst sind. */
+    val workMinutes: Int?
+        get() = if (workStartMinute != null && workEndMinute != null && workEndMinute > workStartMinute) {
+            workEndMinute - workStartMinute
+        } else {
+            null
+        }
 
     /** Gefahrene km, falls beide Kilometerstände vorhanden und plausibel sind. */
     val distanceKm: Int?

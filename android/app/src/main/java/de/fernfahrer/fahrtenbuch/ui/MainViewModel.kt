@@ -13,6 +13,9 @@ import de.fernfahrer.fahrtenbuch.data.BackupData
 import de.fernfahrer.fahrtenbuch.data.BackupFormatException
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
+import de.fernfahrer.fahrtenbuch.data.StampResult
+import de.fernfahrer.fahrtenbuch.domain.CountingRules
+import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.Period
 import de.fernfahrer.fahrtenbuch.domain.PeriodType
@@ -44,6 +47,9 @@ data class ActiveTour(
     val dayNumber: Int,
     val lastCountry: String,
     val todayEntered: Boolean,
+    /** Heute erfasster Arbeitsbeginn/-ende (für die Firma), falls vorhanden. */
+    val todayWorkStart: Int? = null,
+    val todayWorkEnd: Int? = null,
 )
 
 enum class ExportFormat { PDF, CSV }
@@ -62,12 +68,15 @@ class MainViewModel(
         val tourDays = days.filter { it.day.tourId == tour.id }.map { it.day }
         val start = tourDays.minOfOrNull { it.date } ?: return@combine null
         val today = LocalDate.now()
+        val todayDay = days.firstOrNull { it.day.date == today }?.day
         ActiveTour(
             tourId = tour.id,
             startDate = start,
             dayNumber = ChronoUnit.DAYS.between(start, today).toInt() + 1,
             lastCountry = tourDays.maxBy { it.date }.countryCode,
             todayEntered = tourDays.any { it.date == today },
+            todayWorkStart = todayDay?.workStartMinute,
+            todayWorkEnd = todayDay?.workEndMinute,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -77,6 +86,29 @@ class MainViewModel(
     val driverName: StateFlow<String> = settings.driverName
 
     fun setDriverName(name: String) = settings.setDriverName(name)
+
+    val rules: StateFlow<CountingRules> = settings.rules
+
+    fun setShortSingleDayAsHalf(enabled: Boolean) = settings.setShortSingleDayAsHalf(enabled)
+
+    /** Trägt die aktuelle Uhrzeit als Arbeitsbeginn ([isStart]) oder Arbeitsende für heute ein. */
+    fun stampWorkTime(isStart: Boolean) {
+        viewModelScope.launch {
+            try {
+                val minute = Format.nowMinutes(roundTo = 1).let { if (!isStart && it == 0) 24 * 60 else it }
+                when (val r = repo.stampWorkTime(LocalDate.now(), minute, isStart)) {
+                    is StampResult.Saved -> {
+                        val what = if (isStart) "Arbeitsbeginn" else "Arbeitsende"
+                        val extra = if (r.filledDays > 0) " (${Format.days(r.filledDays)} der Tour ergänzt)" else ""
+                        showMessage("$what ${Format.time(r.minute)} gespeichert$extra")
+                    }
+                    StampResult.NoActiveTour -> showMessage("Es läuft keine Tour.")
+                }
+            } catch (e: Exception) {
+                showMessage("Speichern fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
+            }
+        }
+    }
 
     /** Zeitraum der Auswertung (bleibt beim Wechsel der Tabs erhalten). */
     private val _period = MutableStateFlow(Period(PeriodType.YEAR, LocalDate.now()))
@@ -112,15 +144,16 @@ class MainViewModel(
                 val inYear = all.filter { period.contains(it.day.date) }
                 val summary = Stats.summarize(inYear)
                 val driver = settings.driverName.value
+                val rules = settings.rules.value
                 val file = withContext(Dispatchers.IO) {
                     val dir = Share.exportDir(appContext)
                     dir.listFiles()?.forEach(File::delete)
                     when (format) {
                         ExportFormat.PDF -> File(dir, "Fahrtenbuch_$year.pdf").also {
-                            PdfExporter.write(it, year, inYear, summary, driver)
+                            PdfExporter.write(it, year, inYear, summary, driver, rules)
                         }
                         ExportFormat.CSV -> File(dir, "Fahrtenbuch_$year.csv").also {
-                            it.writeText(CsvExporter.build(year, inYear, summary, driver), Charsets.UTF_8)
+                            it.writeText(CsvExporter.build(year, inYear, summary, driver, rules), Charsets.UTF_8)
                         }
                     }
                 }
@@ -140,7 +173,7 @@ class MainViewModel(
         val resolver = context.applicationContext.contentResolver
         viewModelScope.launch {
             try {
-                val data = repo.exportData().copy(driverName = settings.driverName.value)
+                val data = repo.exportData().copy(driverName = settings.driverName.value, rules = settings.rules.value)
                 withContext(Dispatchers.IO) {
                     resolver.openOutputStream(uri, "wt")?.use { it.write(Backup.toJson(data).toByteArray()) }
                         ?: error("Datei konnte nicht geöffnet werden")
@@ -180,6 +213,7 @@ class MainViewModel(
             try {
                 repo.replaceAll(data)
                 if (data.driverName.isNotBlank()) settings.setDriverName(data.driverName)
+                data.rules?.let { settings.setShortSingleDayAsHalf(it.shortSingleDayAsHalf) }
                 showMessage("Datensicherung geladen: ${data.days.size} Tage")
             } catch (e: Exception) {
                 showMessage("Wiederherstellen fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")

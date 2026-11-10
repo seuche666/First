@@ -110,6 +110,23 @@ fun StatsScreen(vm: MainViewModel) {
                             StatTile(sum.half.toString(), "halbe Tage", Modifier.weight(1f))
                             StatTile(Format.number(sum.km), "km gefahren", Modifier.weight(1f))
                         }
+                        if (sum.companyRuleDays > 0) {
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Davon ${Format.days(sum.companyRuleDays)} nur nach Firmenregel halb " +
+                                    "(eintägig, 8 Std. oder weniger – das Finanzamt verlangt mehr als 8 Std.)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                        if (sum.workMinutes > 0) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "Erfasste Arbeitszeit: ${Format.duration(sum.workMinutes)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (sum.notCounted > 0) {
                             Spacer(Modifier.height(10.dp))
                             Text(

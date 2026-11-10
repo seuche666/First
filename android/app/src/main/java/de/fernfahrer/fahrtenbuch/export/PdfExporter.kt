@@ -5,6 +5,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
+import de.fernfahrer.fahrtenbuch.domain.CountingRules
 import de.fernfahrer.fahrtenbuch.domain.Countries
 import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.Summary
@@ -30,7 +31,14 @@ object PdfExporter {
             textAlign = align
         }
 
-    fun write(file: File, year: Int, days: List<ClassifiedDay>, summary: Summary, driverName: String) {
+    fun write(
+        file: File,
+        year: Int,
+        days: List<ClassifiedDay>,
+        summary: Summary,
+        driverName: String,
+        rules: CountingRules = CountingRules(),
+    ) {
         val doc = PdfDocument()
         val w = Writer(doc)
 
@@ -40,7 +48,8 @@ object PdfExporter {
             if (driverName.isNotBlank()) append("Fahrer: $driverName  ·  ")
             append("Erstellt am ${Format.date(LocalDate.now())}")
         }
-        w.text(sub, paint(10f, color = muted), 22f)
+        w.text(sub, paint(10f, color = muted), 16f)
+        w.text("Zählregel: " + rules.singleDayRuleText, paint(9f, color = muted), 20f)
 
         // Zusammenfassung
         w.text("Zusammenfassung", paint(13f, bold = true), 20f)
@@ -64,8 +73,17 @@ object PdfExporter {
         w.text("Tage unterwegs gesamt: ${summary.daysAway}  (davon ${summary.full} volle und ${summary.half} halbe Tage)", body, 16f)
         w.text("Davon im Ausland: ${summary.abroadDays} Tage in ${summary.abroad.size} Ländern", body, 16f)
         w.text("Gefahrene Kilometer: ${Format.km(summary.km)}", body, 16f)
+        if (summary.companyRuleDays > 0) {
+            w.text(
+                "Davon nur nach Firmenregel halb (eintägig, 8 Std. oder weniger): ${summary.companyRuleDays} Tage †",
+                body, 16f,
+            )
+        }
         if (summary.notCounted > 0) {
             w.text("Nicht gezählt (eintägig bis 8 Std. oder manuell): ${summary.notCounted} Tage", body, 16f)
+        }
+        if (summary.workMinutes > 0) {
+            w.text("Erfasste Arbeitszeit (für die Firma): ${Format.duration(summary.workMinutes)}", body, 16f)
         }
         w.space(4f)
         w.text("Hinweis: Die App zählt nur Tage. Steuerbeträge werden nicht berechnet.", paint(9f, color = muted), 14f)
@@ -73,8 +91,9 @@ object PdfExporter {
 
         // Einzelne Tage
         w.text("Einzelne Tage", paint(13f, bold = true), 20f)
-        val dayCols = floatArrayOf(72f, 92f, 36f, 36f, 52f, 62f, 45f, CONTENT_W - 395f)
-        val dayHead = listOf("Datum", "Land", "Beginn", "Ende", "Dauer", "Einordnung", "km", "Notiz")
+        // Spalten: Datum | Land | Abwesend | Dauer | Arbeitszeit | Einordnung | km | Notiz
+        val dayCols = floatArrayOf(70f, 74f, 62f, 40f, 62f, 66f, 38f, CONTENT_W - 412f)
+        val dayHead = listOf("Datum", "Land", "Abwesend", "Dauer", "Arbeitszeit", "Einordnung", "km", "Notiz")
         val small = paint(8.5f)
         val smallHead = paint(8.5f, bold = true, color = muted)
         w.onNewPage = {
@@ -83,17 +102,26 @@ object PdfExporter {
         }
         w.onNewPage!!.invoke()
         var anyManual = false
+        var anyCompanyRule = false
         days.sortedBy { it.day.date }.forEachIndexed { i, c ->
             val d = c.day
             if (c.isManual) anyManual = true
+            if (c.byCompanyRule) anyCompanyRule = true
+            val work = when {
+                d.workStartMinute != null && d.workEndMinute != null ->
+                    "${Format.time(d.workStartMinute)}–${Format.time(d.workEndMinute)}"
+                d.workStartMinute != null -> "ab ${Format.time(d.workStartMinute)}"
+                d.workEndMinute != null -> "bis ${Format.time(d.workEndMinute)}"
+                else -> ""
+            }
             w.row(
                 listOf(
                     Format.weekdayShort(d.date) + ", " + Format.date(d.date),
                     Countries.name(d.countryCode),
-                    Format.time(d.startMinute),
-                    Format.time(d.endMinute),
+                    "${Format.time(d.startMinute)}–${Format.time(d.endMinute)}",
                     "%d:%02d h".format(d.absenceMinutes / 60, d.absenceMinutes % 60),
-                    c.type.label + if (c.isManual) " *" else "",
+                    work,
+                    c.type.label + (if (c.isManual) " *" else "") + (if (c.byCompanyRule) " †" else ""),
                     d.distanceKm?.let { Format.number(it) } ?: "",
                     d.note.replace('\n', ' '),
                 ),
@@ -101,9 +129,16 @@ object PdfExporter {
             )
         }
         if (days.isEmpty()) w.text("Keine Einträge in diesem Jahr.", small, 14f)
+        if (anyManual || anyCompanyRule) w.space(6f)
         if (anyManual) {
-            w.space(6f)
             w.text("* Einordnung manuell geändert", paint(8.5f, color = muted), 12f)
+        }
+        if (anyCompanyRule) {
+            w.text(
+                "† Halber Tag nach Firmenregel: eintägige Fahrt mit 8 Stunden oder weniger " +
+                    "(Finanzamt: erst bei mehr als 8 Stunden)",
+                paint(8.5f, color = muted), 12f,
+            )
         }
 
         w.finish()
@@ -147,10 +182,31 @@ object PdfExporter {
             y += h
         }
 
+        /** Schreibt Text und bricht ihn bei Bedarf an Wortgrenzen auf mehrere Zeilen um. */
         fun text(s: String, p: Paint, lineHeight: Float) {
-            ensure(lineHeight)
-            y += lineHeight
-            page.canvas.drawText(fit(s, p, CONTENT_W), MARGIN, y - lineHeight * 0.28f, p)
+            wrap(s, p, CONTENT_W).forEachIndexed { i, line ->
+                val h = if (i == 0) lineHeight else p.textSize * 1.35f
+                ensure(h)
+                y += h
+                page.canvas.drawText(fit(line, p, CONTENT_W), MARGIN, y - h * 0.28f, p)
+            }
+        }
+
+        private fun wrap(s: String, p: Paint, maxWidth: Float): List<String> {
+            if (p.measureText(s) <= maxWidth) return listOf(s)
+            val lines = mutableListOf<String>()
+            var current = ""
+            for (word in s.split(' ')) {
+                val candidate = if (current.isEmpty()) word else "$current $word"
+                if (p.measureText(candidate) <= maxWidth || current.isEmpty()) {
+                    current = candidate
+                } else {
+                    lines += current
+                    current = word
+                }
+            }
+            if (current.isNotEmpty()) lines += current
+            return lines
         }
 
         fun line() {

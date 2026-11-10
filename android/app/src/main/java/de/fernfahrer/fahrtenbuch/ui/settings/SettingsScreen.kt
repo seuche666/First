@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -58,6 +59,7 @@ fun SettingsScreen(vm: MainViewModel) {
     val context = LocalContext.current
     val savedName by vm.driverName.collectAsStateWithLifecycle()
     val pending by vm.pendingRestore.collectAsStateWithLifecycle()
+    val rules by vm.rules.collectAsStateWithLifecycle()
     var name by remember(savedName) { mutableStateOf(savedName) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -133,9 +135,36 @@ fun SettingsScreen(vm: MainViewModel) {
 
             item {
                 SectionCard(title = "So zählt die App", icon = Icons.AutoMirrored.Rounded.Rule) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Eintägige Fahrten unter 8 Stunden als halben Tag zählen",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                "Firmenregel. Achtung: Das Finanzamt erkennt einen halben Tag erst bei mehr als " +
+                                    "8 Stunden an. Betroffene Tage werden in Auswertung und Export markiert.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(checked = rules.shortSingleDayAsHalf, onCheckedChange = vm::setShortSingleDayAsHalf)
+                    }
                     RuleRow("Voller Tag", "24 Stunden von zu Hause weg – ein Tag mitten in einer mehrtägigen Tour.")
-                    RuleRow("Halber Tag", "An- oder Abreisetag einer Tour, oder eine eintägige Fahrt mit mehr als 8 Stunden Abwesenheit.")
-                    RuleRow("Zählt nicht", "Eintägige Fahrt mit 8 Stunden oder weniger.")
+                    if (rules.shortSingleDayAsHalf) {
+                        RuleRow(
+                            "Halber Tag",
+                            "An- oder Abreisetag einer Tour, oder jede eintägige Fahrt (Firmenregel aktiv).",
+                        )
+                    } else {
+                        RuleRow("Halber Tag", "An- oder Abreisetag einer Tour, oder eine eintägige Fahrt mit mehr als 8 Stunden Abwesenheit.")
+                        RuleRow("Zählt nicht", "Eintägige Fahrt mit 8 Stunden oder weniger.")
+                    }
+                    RuleRow(
+                        "Arbeitszeit",
+                        "Arbeitsbeginn und -ende sind nur für die Firma und ändern die Einordnung nicht.",
+                    )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "Du kannst die Einordnung bei jedem Tag manuell ändern. Die App zählt nur Tage – " +

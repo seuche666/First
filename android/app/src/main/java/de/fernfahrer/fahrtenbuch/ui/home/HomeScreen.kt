@@ -30,6 +30,8 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.LocalShipping
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.WorkHistory
+import androidx.compose.material.icons.rounded.WorkOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -106,6 +108,8 @@ fun HomeScreen(vm: MainViewModel, onOpenEditor: (id: Long, mode: EditorMode) -> 
                         tour = activeTour,
                         onDay = { onOpenEditor(0, EditorMode.TOUR_DAY) },
                         onEnd = { onOpenEditor(0, EditorMode.TOUR_END) },
+                        onWorkStart = { vm.stampWorkTime(isStart = true) },
+                        onWorkEnd = { vm.stampWorkTime(isStart = false) },
                     )
                 } else {
                     CaptureButtons(
@@ -179,7 +183,13 @@ private fun CaptureButtons(todayEntered: Boolean, onCapture: () -> Unit, onStart
 }
 
 @Composable
-private fun TourCard(tour: ActiveTour, onDay: () -> Unit, onEnd: () -> Unit) {
+private fun TourCard(
+    tour: ActiveTour,
+    onDay: () -> Unit,
+    onEnd: () -> Unit,
+    onWorkStart: () -> Unit,
+    onWorkEnd: () -> Unit,
+) {
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
@@ -220,6 +230,23 @@ private fun TourCard(tour: ActiveTour, onDay: () -> Unit, onEnd: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                WorkButton(
+                    label = "Arbeit beginnen",
+                    time = tour.todayWorkStart,
+                    icon = Icons.Rounded.WorkHistory,
+                    onClick = onWorkStart,
+                    modifier = Modifier.weight(1f),
+                )
+                WorkButton(
+                    label = "Arbeit beenden",
+                    time = tour.todayWorkEnd,
+                    icon = Icons.Rounded.WorkOff,
+                    onClick = onWorkEnd,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
             FilledTonalButton(
                 onClick = onEnd,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -233,6 +260,38 @@ private fun TourCard(tour: ActiveTour, onDay: () -> Unit, onEnd: () -> Unit) {
                 Spacer(Modifier.width(10.dp))
                 Text("Tour beenden", style = MaterialTheme.typography.titleMedium)
             }
+        }
+    }
+}
+
+/** Ein-Tipp-Button: trägt die aktuelle Uhrzeit als Arbeitsbeginn oder -ende für heute ein. */
+@Composable
+private fun WorkButton(
+    label: String,
+    time: Int?,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier.height(64.dp),
+        shape = MaterialTheme.shapes.large,
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.primary,
+        ),
+    ) {
+        Icon(icon, null, Modifier.size(22.dp))
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Text(
+                time?.let { "✓ ${Format.time(it)}" } ?: "jetzt eintragen",
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
         }
     }
 }

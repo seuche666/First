@@ -13,7 +13,7 @@ class FahrtenbuchApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        repository = Repository(AppDatabase.create(this))
         settings = Settings(this)
+        repository = Repository(AppDatabase.create(this), settings.rules)
     }
 }

@@ -12,12 +12,12 @@ im Ausland, dazu die gefahrenen Kilometer. Die App zählt nur, sie berechnet kei
 
 | Bereich | Was die App kann |
 |---|---|
-| **Heute** | Großer Button „Heute erfassen“, „Mehrtägige Tour starten“, während einer Tour „Heute erfassen“ und „Tour beenden“. Karten mit der Zusammenfassung von Woche und Jahr. |
-| **Eingabe** | Datum (Standard: heute), Beginn und Ende der Abwesenheit, Land (Suche, zuletzt genutzte Länder oben, Deutschland vorausgewählt), Kilometerstand morgens und abends mit automatischer Berechnung, Notiz. Fehlende Tage einer Tour werden auf Wunsch ergänzt. |
+| **Heute** | Großer Button „Heute erfassen“, „Mehrtägige Tour starten“, während einer Tour „Heute erfassen“, „Arbeit beginnen“, „Arbeit beenden“ (trägt mit einem Tipp die aktuelle Uhrzeit ein) und „Tour beenden“. Karten mit der Zusammenfassung von Woche und Jahr. |
+| **Eingabe** | Datum (Standard: heute), Beginn und Ende der Abwesenheit, **Arbeitsbeginn und Arbeitsende** (für die Firma, ohne Einfluss auf die Steuer-Einordnung), Land (Suche, zuletzt genutzte Länder oben, Deutschland vorausgewählt), Kilometerstand morgens und abends mit automatischer Berechnung, Notiz. Fehlende Tage einer Tour werden auf Wunsch ergänzt. |
 | **Einordnung** | Automatisch (siehe unten), bei jedem Tag manuell änderbar: Auto / Voll / Halb / Keiner. |
-| **Verlauf** | Alle Tage nach Monaten, antippen zum Bearbeiten oder Löschen, Tage nachtragen. |
+| **Verlauf** | Alle Tage nach Monaten mit Arbeitszeit, antippen zum Bearbeiten oder Löschen, Tage nachtragen. |
 | **Auswertung** | Woche, Monat, Jahr oder gesamt. Volle und halbe Tage in Deutschland und je Auslandsland, Tage gesamt, km, Diagramme „Tage pro Land“ und „Kilometer pro Tag/Woche/Monat/Jahr“. |
-| **Export** | Jahresübersicht als **PDF** und **CSV** (für Excel) über das Android-Teilen-Menü. |
+| **Export** | Jahresübersicht als **PDF** und **CSV** (für Excel) über das Android-Teilen-Menü, mit Arbeitszeiten, Begründung je Tag und der aktiven Zählregel. |
 | **Datensicherung** | Alle Daten als Datei speichern und wiederherstellen (für einen Handywechsel). |
 
 ### So ordnet die App Tage ein
@@ -25,6 +25,15 @@ im Ausland, dazu die gefahrenen Kilometer. Die App zählt nur, sie berechnet kei
 - **Voller Tag:** ein Tag mitten in einer mehrtägigen Tour (24 Stunden von zu Hause weg).
 - **Halber Tag:** An- oder Abreisetag einer Tour, oder eine eintägige Fahrt mit **mehr als 8 Stunden** Abwesenheit.
 - **Zählt nicht:** eintägige Fahrt mit 8 Stunden oder weniger.
+
+**Firmenregel (Einstellungen, Standard: aus):** „Eintägige Fahrten unter 8 Stunden als halben Tag zählen“.
+Ist sie an, zählt jede eintägige Fahrt als halber Tag. Weil das Finanzamt dafür mehr als 8 Stunden
+verlangt, werden solche Tage in der Begründung, in der Auswertung und im Export (PDF: †, CSV: Spalte
+„Firmenregel“) gekennzeichnet, und die aktive Regel steht im Kopf des Exports.
+
+**Arbeitszeit:** Arbeitsbeginn und -ende werden pro Tag getrennt von der Abwesenheit gespeichert
+(während einer Tour ist die Abwesenheit z. B. 00:00–24:00). Beim Tourstart wird der Arbeitsbeginn,
+beim Tourende das Arbeitsende automatisch mitgesetzt; alles lässt sich von Hand ändern.
 
 Eine Tour, die am selben Tag beginnt und endet, zählt wie eine eintägige Fahrt.
 
@@ -67,6 +76,14 @@ Lokal signiert bauen:
 ```bash
 SIGNING_KEYSTORE_PATH=/pfad/zum/keystore.jks SIGNING_PASSWORD=… ./gradlew assembleRelease
 ```
+
+## Datenbank und Datensicherung
+
+- Room-Datenbank Version 2 (Arbeitszeit-Spalten). Die Migration 1 → 2 übernimmt alle bestehenden Daten;
+  die Schemata liegen in `app/schemas/`, ein Test (`MigrationTest`) prüft das Update an einer echten
+  Datenbank im alten Format.
+- Datensicherung Format-Version 2 (zusätzlich Arbeitszeiten und Zählregel). Sicherungen der ersten
+  App-Version (Format 1) lassen sich weiterhin laden.
 
 ## Selbst bauen
 

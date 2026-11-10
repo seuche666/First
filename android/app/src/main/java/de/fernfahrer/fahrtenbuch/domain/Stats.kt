@@ -18,6 +18,10 @@ data class Summary(
     val germany: CountryCount,
     /** Auslandstage je Land, meiste Tage zuerst. Nur Länder mit mindestens einem Tag. */
     val abroad: List<CountryCount>,
+    /** Halbe Tage, die nur wegen der Firmenregel zählen (eintägig, 8 Std. oder weniger). */
+    val companyRuleDays: Int = 0,
+    /** Summe der erfassten Arbeitszeit in Minuten (nur für die Firma). */
+    val workMinutes: Int = 0,
 ) {
     /** Tage unterwegs = volle + halbe Tage. */
     val daysAway: Int get() = full + half
@@ -50,6 +54,8 @@ object Stats {
             km = selected.sumOf { it.day.distanceKm ?: 0 },
             germany = germany,
             abroad = abroad,
+            companyRuleDays = selected.count { it.byCompanyRule },
+            workMinutes = selected.sumOf { it.day.workMinutes ?: 0 },
         )
     }
 

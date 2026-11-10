@@ -11,6 +11,7 @@ import de.fernfahrer.fahrtenbuch.FahrtenbuchApp
 import de.fernfahrer.fahrtenbuch.data.DayEntity
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.domain.Classifier
+import de.fernfahrer.fahrtenbuch.domain.CountingRules
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.Stats
@@ -40,8 +41,13 @@ data class EditorState(
     val tourId: Long? = null,
     val tourStart: LocalDate? = null,
     val override: DayType? = null,
+    /** Arbeitsbeginn/-ende für die Firma; ohne Einfluss auf die Steuer-Einordnung. */
+    val workStart: Int? = null,
+    val workEnd: Int? = null,
     val autoType: DayType = DayType.NONE,
     val autoReason: String = "",
+    /** Automatische Einordnung beruht auf der Firmenregel. */
+    val autoCompanyRule: Boolean = false,
     val missingDates: List<LocalDate> = emptyList(),
     val fillGaps: Boolean = true,
     val error: String? = null,
@@ -58,6 +64,8 @@ data class EditorState(
             return if (e >= s) e - s else null
         }
     val effectiveType: DayType get() = override ?: autoType
+    val workMinutes: Int?
+        get() = if (workStart != null && workEnd != null && workEnd > workStart) workEnd - workStart else null
     val isTourDay: Boolean get() = tourId != null || mode == EditorMode.TOUR_START
 
     val title: String
@@ -71,6 +79,7 @@ data class EditorState(
 
 class EditorViewModel(
     private val repo: Repository,
+    private val rules: StateFlow<CountingRules>,
     savedState: SavedStateHandle,
 ) : ViewModel() {
 
@@ -120,10 +129,15 @@ class EditorViewModel(
                 note = existing.note,
                 tourId = existing.tourId ?: active?.id,
                 override = existing.dayTypeOverride,
+                workStart = existing.workStartMinute,
+                workEnd = existing.workEndMinute,
             )
             when (mode) {
-                EditorMode.TOUR_START -> s = s.copy(endMinute = MIDNIGHT)
-                EditorMode.TOUR_END -> if (s.endMinute == MIDNIGHT) s = s.copy(endMinute = Format.nowMinutes())
+                EditorMode.TOUR_START -> s = s.copy(endMinute = MIDNIGHT, workStart = s.workStart ?: s.startMinute)
+                EditorMode.TOUR_END -> {
+                    if (s.endMinute == MIDNIGHT) s = s.copy(endMinute = Format.nowMinutes(roundTo = 1).coerceAtLeast(1))
+                    s = s.copy(workEnd = s.workEnd ?: autoWorkEnd(s.workStart, s.endMinute))
+                }
                 else -> Unit
             }
         } else {
@@ -145,21 +159,27 @@ class EditorViewModel(
                         countryCode = country, kmStart = km,
                     )
                 }
-                EditorMode.TOUR_START -> EditorState(
-                    loading = false, mode = mode, date = today,
-                    startMinute = Format.nowMinutes(), endMinute = MIDNIGHT,
-                    countryCode = country, kmStart = km,
-                )
+                EditorMode.TOUR_START -> Format.nowMinutes(roundTo = 1).let { now ->
+                    EditorState(
+                        loading = false, mode = mode, date = today,
+                        startMinute = now, endMinute = MIDNIGHT,
+                        countryCode = country, kmStart = km,
+                        workStart = now,
+                    )
+                }
                 EditorMode.TOUR_DAY -> EditorState(
                     loading = false, mode = mode, date = today,
                     startMinute = 0, endMinute = MIDNIGHT,
                     countryCode = country, kmStart = km, tourId = active?.id,
                 )
-                EditorMode.TOUR_END -> EditorState(
-                    loading = false, mode = mode, date = today,
-                    startMinute = 0, endMinute = Format.nowMinutes().coerceAtLeast(5),
-                    countryCode = country, kmStart = km, tourId = active?.id,
-                )
+                EditorMode.TOUR_END -> Format.nowMinutes(roundTo = 1).coerceAtLeast(1).let { now ->
+                    EditorState(
+                        loading = false, mode = mode, date = today,
+                        startMinute = 0, endMinute = now,
+                        countryCode = country, kmStart = km, tourId = active?.id,
+                        workEnd = autoWorkEnd(null, now),
+                    )
+                }
             }
         }
         _state.value = s
@@ -196,16 +216,18 @@ class EditorViewModel(
     private fun recompute() {
         val s = _state.value
         val day = s.toEntity()
-        val (type, reason) = when {
-            s.mode == EditorMode.TOUR_START && s.tourId == null -> Classifier.autoType(day, listOf(day), false)
+        val r = rules.value
+        val auto = when {
+            s.mode == EditorMode.TOUR_START && s.tourId == null -> Classifier.autoType(day, listOf(day), false, r)
             s.tourId != null -> Classifier.autoType(
                 day,
                 otherTourDays + day,
                 tourEnded || s.mode == EditorMode.TOUR_END,
+                r,
             )
-            else -> Classifier.autoType(day, null, false)
+            else -> Classifier.autoType(day, null, false, r)
         }
-        _state.update { it.copy(autoType = type, autoReason = reason) }
+        _state.update { it.copy(autoType = auto.type, autoReason = auto.reason, autoCompanyRule = auto.companyRule) }
     }
 
     private fun EditorState.toEntity() = DayEntity(
@@ -219,6 +241,8 @@ class EditorViewModel(
         note = note.trim(),
         tourId = tourId,
         dayTypeOverride = override,
+        workStartMinute = workStart,
+        workEndMinute = workEnd,
     )
 
     private fun edit(block: (EditorState) -> EditorState) {
@@ -231,10 +255,31 @@ class EditorViewModel(
         viewModelScope.launch { loadTourContext() }
     }
 
-    fun setStart(minutes: Int) = edit { it.copy(startMinute = minutes.coerceIn(0, MIDNIGHT - 1)) }
+    /**
+     * Beginn der Abwesenheit. Beim Tourstart folgt der Arbeitsbeginn automatisch,
+     * solange er noch dem Beginn der Abwesenheit entspricht.
+     */
+    fun setStart(minutes: Int) = edit {
+        val m = minutes.coerceIn(0, MIDNIGHT - 1)
+        val syncWork = it.mode == EditorMode.TOUR_START && it.workStart == it.startMinute
+        it.copy(startMinute = m, workStart = if (syncWork) m else it.workStart)
+    }
 
-    /** 00:00 als Ende bedeutet Mitternacht (24:00). */
-    fun setEnd(minutes: Int) = edit { it.copy(endMinute = if (minutes == 0) MIDNIGHT else minutes) }
+    /**
+     * Ende der Abwesenheit; 00:00 bedeutet Mitternacht (24:00). Beim Tourende folgt das
+     * Arbeitsende automatisch, solange es noch dem Ende der Abwesenheit entspricht.
+     */
+    fun setEnd(minutes: Int) = edit {
+        val m = if (minutes == 0) MIDNIGHT else minutes
+        val syncWork = it.mode == EditorMode.TOUR_END && it.workEnd == it.endMinute
+        it.copy(endMinute = m, workEnd = if (syncWork) m else it.workEnd)
+    }
+
+    /** Arbeitsbeginn setzen oder löschen (null). */
+    fun setWorkStart(minutes: Int?) = edit { it.copy(workStart = minutes?.coerceIn(0, MIDNIGHT - 1)) }
+
+    /** Arbeitsende setzen oder löschen (null); 00:00 bedeutet 24:00. */
+    fun setWorkEnd(minutes: Int?) = edit { it.copy(workEnd = minutes?.let { m -> if (m == 0) MIDNIGHT else m }) }
 
     fun setAwaySincePreviousDay(on: Boolean) = edit {
         it.copy(startMinute = if (on) 0 else if (it.startMinute == 0) 6 * 60 else it.startMinute)
@@ -299,6 +344,10 @@ class EditorViewModel(
     }
 
     companion object {
+        /** Automatisches Arbeitsende beim Tourende – nur wenn es nach dem Arbeitsbeginn liegt. */
+        fun autoWorkEnd(workStart: Int?, end: Int): Int? =
+            if (workStart == null || end > workStart) end else null
+
         fun validate(s: EditorState): String? {
             if (s.endMinute <= s.startMinute) return "Das Ende muss nach dem Beginn liegen."
             val start = s.kmStart.toIntOrNull()
@@ -307,13 +356,16 @@ class EditorViewModel(
                 return "Der Kilometerstand abends ist kleiner als morgens."
             }
             if (s.countryCode.isBlank()) return "Bitte ein Land wählen."
+            if (s.workStart != null && s.workEnd != null && s.workEnd <= s.workStart) {
+                return "Das Arbeitsende muss nach dem Arbeitsbeginn liegen."
+            }
             return null
         }
 
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as FahrtenbuchApp
-                EditorViewModel(app.repository, createSavedStateHandle())
+                EditorViewModel(app.repository, app.settings.rules, createSavedStateHandle())
             }
         }
     }

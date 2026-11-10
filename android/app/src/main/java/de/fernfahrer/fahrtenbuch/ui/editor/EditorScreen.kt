@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.LocalShipping
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -90,6 +91,8 @@ fun EditorScreen(
     var pickDate by rememberSaveable { mutableStateOf(false) }
     var pickStart by rememberSaveable { mutableStateOf(false) }
     var pickEnd by rememberSaveable { mutableStateOf(false) }
+    var pickWorkStart by rememberSaveable { mutableStateOf(false) }
+    var pickWorkEnd by rememberSaveable { mutableStateOf(false) }
     var pickCountry by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
@@ -198,6 +201,39 @@ fun EditorScreen(
                 Text(
                     "Abwesenheit: ${Format.duration(s.absenceMinutes)}",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // Arbeitszeit für die Firma
+            FieldCard(icon = Icons.Rounded.Work, title = "Arbeitszeit (für die Firma)") {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TimeTile(
+                        "Arbeitsbeginn", s.workStart?.let(Format::time) ?: "--:--", Modifier.weight(1f),
+                    ) { pickWorkStart = true }
+                    TimeTile(
+                        "Arbeitsende", s.workEnd?.let(Format::time) ?: "--:--", Modifier.weight(1f),
+                    ) { pickWorkEnd = true }
+                }
+                if (s.workStart != null || s.workEnd != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            s.workMinutes?.let { "Arbeitszeit: ${Format.duration(it)}" } ?: "Arbeitszeit noch unvollständig",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = {
+                            vm.setWorkStart(null)
+                            vm.setWorkEnd(null)
+                        }) { Text("Leeren") }
+                    }
+                } else {
+                    Spacer(Modifier.height(6.dp))
+                }
+                Text(
+                    "Hat keinen Einfluss auf die Einordnung für die Steuer.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -353,6 +389,22 @@ fun EditorScreen(
         TimePickerDialog("Ende der Abwesenheit", if (s.endMinute == MIDNIGHT) 0 else s.endMinute, onDismiss = { pickEnd = false }) {
             pickEnd = false
             vm.setEnd(it)
+        }
+    }
+    if (pickWorkStart) {
+        TimePickerDialog("Arbeitsbeginn", s.workStart ?: Format.nowMinutes(), onDismiss = { pickWorkStart = false }) {
+            pickWorkStart = false
+            vm.setWorkStart(it)
+        }
+    }
+    if (pickWorkEnd) {
+        TimePickerDialog(
+            "Arbeitsende",
+            s.workEnd?.let { if (it == MIDNIGHT) 0 else it } ?: Format.nowMinutes(),
+            onDismiss = { pickWorkEnd = false },
+        ) {
+            pickWorkEnd = false
+            vm.setWorkEnd(it)
         }
     }
     if (pickCountry) {

@@ -1,5 +1,6 @@
 package de.fernfahrer.fahrtenbuch.data
 
+import de.fernfahrer.fahrtenbuch.domain.CountingRules
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import org.json.JSONArray
 import org.json.JSONObject
@@ -9,14 +10,23 @@ data class BackupData(
     val tours: List<TourEntity>,
     val days: List<DayEntity>,
     val driverName: String = "",
+    /** Zählregeln aus der Sicherung; null bei alten Sicherungen (Version 1) ohne diese Angabe. */
+    val rules: CountingRules? = null,
 )
 
 class BackupFormatException(message: String) : Exception(message)
 
-/** Wandelt alle Daten in eine JSON-Datei um und zurück (für Handywechsel). */
+/**
+ * Wandelt alle Daten in eine JSON-Datei um und zurück (für Handywechsel).
+ *
+ * Versionen:
+ * - 1: Tage, Touren, Fahrername
+ * - 2: zusätzlich Arbeitsbeginn/-ende pro Tag und die Zählregel (Firmenregel). Sicherungen der
+ *      Version 1 werden weiterhin gelesen; fehlende Felder bleiben leer.
+ */
 object Backup {
     private const val APP_ID = "fahrtenbuch-android"
-    private const val VERSION = 1
+    const val VERSION = 2
 
     fun toJson(data: BackupData): String {
         val root = JSONObject()
@@ -24,6 +34,7 @@ object Backup {
         root.put("version", VERSION)
         root.put("exportedAt", java.time.LocalDateTime.now().withNano(0).toString())
         root.put("driverName", data.driverName)
+        data.rules?.let { root.put("rules", JSONObject().put("shortSingleDayAsHalf", it.shortSingleDayAsHalf)) }
         root.put("tours", JSONArray().apply {
             data.tours.forEach { put(JSONObject().put("id", it.id).put("ended", it.ended)) }
         })
@@ -40,7 +51,9 @@ object Backup {
                         .put("kmEnd", d.kmEnd ?: JSONObject.NULL)
                         .put("note", d.note)
                         .put("tourId", d.tourId ?: JSONObject.NULL)
-                        .put("dayTypeOverride", d.dayTypeOverride?.name ?: JSONObject.NULL),
+                        .put("dayTypeOverride", d.dayTypeOverride?.name ?: JSONObject.NULL)
+                        .put("workStartMinute", d.workStartMinute ?: JSONObject.NULL)
+                        .put("workEndMinute", d.workEndMinute ?: JSONObject.NULL),
                 )
             }
         })
@@ -82,12 +95,18 @@ object Backup {
                     tourId = tourId,
                     dayTypeOverride = d.optStringOrNull("dayTypeOverride")
                         ?.let { v -> DayType.entries.firstOrNull { it.name == v } },
+                    // Ab Version 2; in alten Sicherungen nicht vorhanden → leer.
+                    workStartMinute = d.optIntOrNull("workStartMinute")?.coerceIn(0, 1439),
+                    workEndMinute = d.optIntOrNull("workEndMinute")?.coerceIn(1, 1440),
                 )
             }
             if (days.map { it.date }.toSet().size != days.size) {
                 throw BackupFormatException("Die Sicherung enthält einen Tag doppelt.")
             }
-            return BackupData(tours, days, root.optString("driverName", ""))
+            val rules = root.optJSONObject("rules")?.let {
+                CountingRules(shortSingleDayAsHalf = it.optBoolean("shortSingleDayAsHalf", false))
+            }
+            return BackupData(tours, days, root.optString("driverName", ""), rules)
         } catch (e: BackupFormatException) {
             throw e
         } catch (e: Exception) {
@@ -95,7 +114,7 @@ object Backup {
         }
     }
 
-    private fun JSONObject.optLongOrNull(key: String): Long? = if (isNull(key) || !has(key)) null else getLong(key)
-    private fun JSONObject.optIntOrNull(key: String): Int? = if (isNull(key) || !has(key)) null else getInt(key)
-    private fun JSONObject.optStringOrNull(key: String): String? = if (isNull(key) || !has(key)) null else getString(key)
+    private fun JSONObject.optLongOrNull(key: String): Long? = if (!has(key) || isNull(key)) null else getLong(key)
+    private fun JSONObject.optIntOrNull(key: String): Int? = if (!has(key) || isNull(key)) null else getInt(key)
+    private fun JSONObject.optStringOrNull(key: String): String? = if (!has(key) || isNull(key)) null else getString(key)
 }

@@ -101,6 +101,14 @@ fun HistoryScreen(vm: MainViewModel, onOpenDay: (Long) -> Unit, onAdd: () -> Uni
     }
 }
 
+/** Arbeitszeit als kurzer Text, z. B. "Arbeit 06:10–17:45". */
+private fun workText(start: Int?, end: Int?): String? = when {
+    start != null && end != null -> "Arbeit ${Format.time(start)}–${Format.time(end)}"
+    start != null -> "Arbeit ab ${Format.time(start)}"
+    end != null -> "Arbeit bis ${Format.time(end)}"
+    else -> null
+}
+
 @Composable
 private fun MonthHeader(month: YearMonth, entries: List<ClassifiedDay>) {
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
@@ -182,6 +190,13 @@ private fun DayCard(entry: ClassifiedDay, onClick: () -> Unit, modifier: Modifie
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                workText(d.workStartMinute, d.workEndMinute)?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 if (d.note.isNotBlank()) {
                     Text(
                         d.note,

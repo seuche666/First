@@ -58,4 +58,16 @@ class StatsTest {
         assertEquals(LocalDate.parse("2026-11-09"), p.start)
         assertEquals(LocalDate.parse("2026-11-15"), p.end)
     }
+
+    @Test
+    fun firmenregelUndArbeitszeitInDerAuswertung() {
+        val withWork = days.map { if (it.id == 5L) it.copy(workStartMinute = 360, workEndMinute = 1080) else it }
+        val c = Classifier.classifyAll(withWork, listOf(tour), de.fernfahrer.fahrtenbuch.domain.CountingRules(true))
+        val s = Stats.summarize(c, Period(PeriodType.YEAR, LocalDate.parse("2026-06-01")))
+        // Tag 6 (4 Std., eintägig) zählt jetzt als halber Tag nach Firmenregel
+        assertEquals(4, s.half)
+        assertEquals(0, s.notCounted)
+        assertEquals(1, s.companyRuleDays)
+        assertEquals(12 * 60, s.workMinutes)
+    }
 }

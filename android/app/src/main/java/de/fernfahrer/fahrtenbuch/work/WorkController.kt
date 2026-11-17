@@ -28,7 +28,13 @@ class WorkController(
     private val clock: () -> LocalDateTime = LocalDateTime::now,
     /** Streckenaufzeichnung für die Karte (nur während der Arbeitszeit). */
     private val tracking: TrackingControl = TrackingControl.NONE,
+    /** Position beim Arbeitsende für die Übernachtungsorte auf der Karte. */
+    private val stopLocator: StopLocator = StopLocator.NONE,
 ) {
+    /** Zuletzt gestartete Standort-Speicherung (für Tests). */
+    @Volatile var pendingStop: kotlinx.coroutines.Job? = null
+        private set
+
     /** Hintergrundaufgaben (GPS), die weiterlaufen, auch wenn ein Bildschirm geschlossen wird. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -53,6 +59,7 @@ class WorkController(
         val ended = repo.endWork(at, km) ?: return null
         reminders.cancel()
         tracking.sync(workRunning = false)
+        recordStopLater(ended)
         detectCountryLater(ended.endDate ?: at.toLocalDate())
         return ended
     }
@@ -63,6 +70,7 @@ class WorkController(
             if (result.endedShift != null) {
                 reminders.cancel()
                 tracking.sync(workRunning = false)
+                recordStopLater(result.endedShift)
             }
             detectCountryLater(at.toLocalDate())
         }
@@ -89,6 +97,28 @@ class WorkController(
     /** Einstellungen der Karte oder Berechtigungen geändert, Arbeitszeit von Hand bearbeitet. */
     suspend fun syncTracking() {
         tracking.sync(workRunning = repo.getRunningShift() != null)
+    }
+
+    /** Speichert im Hintergrund die Position beim Arbeitsende (Übernachtungsort, falls der Tag eine Übernachtung ist). */
+    private fun recordStopLater(shift: WorkShiftEntity) {
+        val date = shift.endDate ?: return
+        val minute = (shift.endMinute ?: 0).coerceIn(0, 24 * 60)
+        pendingStop = scope.launch {
+            val fix = try {
+                stopLocator.locate()
+            } catch (e: Exception) {
+                null
+            } ?: return@launch
+            repo.addStop(
+                de.fernfahrer.fahrtenbuch.data.StopLocationEntity(
+                    date = date,
+                    minute = minute,
+                    latE5 = Math.round(fix.lat * 100_000).toInt(),
+                    lonE5 = Math.round(fix.lon * 100_000).toInt(),
+                    countryCode = fix.countryCode,
+                ),
+            )
+        }
     }
 
     /** Ermittelt das Land per GPS im Hintergrund und übernimmt es, falls nicht von Hand gewählt. */

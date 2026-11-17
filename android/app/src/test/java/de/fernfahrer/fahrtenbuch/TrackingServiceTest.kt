@@ -154,4 +154,36 @@ class TrackingServiceTest {
             db.close()
         }
     }
+
+    @Test
+    fun arbeitBeendenSpeichertDenStandortFuerUebernachtungen() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(app, AppDatabase::class.java).allowMainThreadQueries().build()
+        try {
+            val settings = Settings(app)
+            settings.setWorkSettings(WorkSettings(reminderEnabled = false, gpsEnabled = false))
+            val now = LocalDateTime.now().withSecond(0).withNano(0)
+            val repo = Repository(db, settings.rules)
+            val controller = WorkController(
+                repo, settings, ReminderScheduler(app, settings), LocationProvider(app),
+                clock = { now }, stopLocator = { de.fernfahrer.fahrtenbuch.work.StopFix(49.79, 9.95, "DE") },
+            )
+            controller.startWork(now.minusHours(3))
+            controller.endWork(now, 1000)
+            controller.pendingStop?.join()
+            val stop = db.stopDao().getAllStops().single()
+            assertEquals(now.toLocalDate(), stop.date)
+            assertEquals(now.hour * 60 + now.minute, stop.minute)
+            assertEquals(4_979_000 to 995_000, stop.latE5 to stop.lonE5)
+            assertEquals("DE", stop.countryCode)
+
+            // Ohne Standort (keine Berechtigung, kein GPS): nichts gespeichert, Arbeitsende klappt trotzdem
+            val noFix = WorkController(repo, settings, ReminderScheduler(app, settings), LocationProvider(app), clock = { now.plusHours(5) })
+            noFix.startWork(now.plusHours(1))
+            assertNotNull(noFix.endWork(now.plusHours(2), null))
+            noFix.pendingStop?.join()
+            assertEquals(1, db.stopDao().getAllStops().size)
+        } finally {
+            db.close()
+        }
+    }
 }

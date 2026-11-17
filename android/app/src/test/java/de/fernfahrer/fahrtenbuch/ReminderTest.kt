@@ -50,7 +50,7 @@ class ReminderTest {
         settings = Settings(context)
         settings.setWorkSettings(WorkSettings(reminderEnabled = true, reminderHours = 15, gpsEnabled = false))
         reminders = ReminderScheduler(context, settings)
-        controller = WorkController(Repository(db, settings.rules), settings, reminders, LocationProvider(context)) { now }
+        controller = WorkController(Repository(db, settings.rules), settings, reminders, LocationProvider(context), clock = { now })
     }
 
     @After

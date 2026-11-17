@@ -32,7 +32,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -40,7 +39,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -76,13 +74,10 @@ fun StatsScreen(vm: MainViewModel) {
     val workByDate by vm.workByDate.collectAsStateWithLifecycle()
     val summary = remember(all, period, workByDate) { Stats.summarize(all, period, workByDate) }
     val kmBars = remember(all, period) { Stats.kmBars(all, period) }
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val exportYear = if (period.type == PeriodType.ALL) LocalDate.now().year else period.anchor.year
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         contentWindowInsets = WindowInsets(0),
-        topBar = { LargeTopAppBar(title = { Text("Auswertung") }, scrollBehavior = scroll) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),

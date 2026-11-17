@@ -26,6 +26,14 @@ import kotlin.coroutines.resume
 class LocationProvider(private val context: Context) {
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var locator: CountryLocator? = null
+    @Volatile private var places: PlaceLocator? = null
+
+    /** Offline-Ortsliste (einmal geladen, danach im Speicher). */
+    suspend fun placeLocator(): PlaceLocator = places ?: withContext(Dispatchers.IO) {
+        synchronized(this@LocationProvider) {
+            places ?: context.assets.open(PlaceLocator.ASSET_NAME).use(PlaceLocator::load).also { places = it }
+        }
+    }
 
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -39,6 +47,9 @@ class LocationProvider(private val context: Context) {
             countryLocator().countryAt(location.latitude, location.longitude)
         }
     }
+
+    /** Aktuelle Position (frisch oder höchstens 10 Minuten alt) oder null. */
+    suspend fun currentPosition(): Location? = if (hasPermission()) currentLocation() else null
 
     /** Ländergrenzen (einmal geladen, danach im Speicher). */
     suspend fun countryLocator(): CountryLocator = locator ?: withContext(Dispatchers.IO) {

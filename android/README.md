@@ -19,7 +19,9 @@ im Ausland, dazu die gefahrenen Kilometer. Die App zählt nur, sie berechnet kei
 | **Verlauf** | Alle Tage nach Monaten mit Arbeitszeit, antippen zum Bearbeiten oder Löschen, Tage nachtragen. |
 | **Auswertung** | Woche, Monat, Jahr oder gesamt. Volle und halbe Tage in Deutschland und je Auslandsland, Tage gesamt, km, Diagramme „Tage pro Land“ und „Kilometer pro Tag/Woche/Monat/Jahr“. |
 | **Export** | Jahresübersicht als **PDF** und **CSV** (für Excel) über das Android-Teilen-Menü, mit Arbeitszeiten, Begründung je Tag und der aktiven Zählregel. |
-| **Karte** | Fog-of-War-Karte: anfangs dunkelgrau verdeckt, überall wo du mit dem LKW gefahren bist freigelegt. Darunter aufgedeckte Fläche (km²), befahrene Länder und Strecke laut GPS. |
+| **Bedienung** | Oben zwei Kacheln „Fahrtenbuch“ und „Karte“ zum Umschalten (die App merkt sich die zuletzt offene Ansicht), Zahnrad oben rechts für die Einstellungen. Untere Leiste im Fahrtenbuch: Heute, Verlauf, Auswertung; in der Kartenansicht ausgeblendet. |
+| **Karte** | Fog-of-War-Karte: anfangs dunkelgrau verdeckt, überall wo du mit dem LKW gefahren bist freigelegt. Eigenes LKW-Symbol, das sich in Fahrtrichtung dreht. Übernachtungsplätze (Mond-Symbol, Stammplätze mit Anzahl). Darunter Strecke laut GPS und befahrene Länder. |
+| **Meilensteine** | Meldung mit Animation bei neuem Land, 1.000 – 100.000 km laut GPS, 10/50/100 Übernachtungen, erster Tour mit 5 Tagen; Übersicht in der Kartenansicht (Pokal-Knopf). |
 | **Datensicherung** | Alle Daten (inkl. GPS-Strecken) als Datei speichern und wiederherstellen (für einen Handywechsel). |
 
 ### So ordnet die App Tage ein
@@ -59,13 +61,24 @@ Rückreisetag). Anzahl in Auswertung, PDF und CSV.
 
 Eine Tour, die am selben Tag beginnt und endet, zählt wie eine eintägige Fahrt.
 
-**Karte (Fog of War):** Eigener Reiter „Karte“ mit OpenStreetMap-Karte (osmdroid, ohne Google, ohne
+**Karte (Fog of War):** Eigene Ansicht „Karte“ mit OpenStreetMap-Karte (osmdroid, ohne Google, ohne
 API-Schlüssel). Darüber liegt dunkelgrauer Nebel, der entlang der gefahrenen Strecken mit weichem Rand
 freigelegt wird. Breite des Korridors in den Einstellungen: 100 m (Standard), 500 m, 1 km oder 5 km – wirkt
 rückwirkend, weil die Rohpunkte gespeichert sind. Beim Rauszoomen bleibt eine Mindestbreite von ein paar
 Pixeln; die Strecken werden je Zoomstufe vereinfacht, damit die Karte auch mit vielen Monaten Daten flüssig
-bleibt. Knöpfe „Mein Standort“ und „Europa“. Namensnennung „© OpenStreetMap-Mitwirkende“ mit Link; eigener
+bleibt. Knöpfe „Meilensteine“, „Übernachtungsplätze“, „Europa“ und „Mein Standort“. Namensnennung „© OpenStreetMap-Mitwirkende“ mit Link; eigener
 User-Agent, Kacheln werden zwischengespeichert, kein Massen-Download (Nutzungsbedingungen der OSM-Kacheln).
+
+**Übernachtungsplätze:** Beim „Arbeit beenden“ speichert die App einmalig den Standort (GPS, sonst letzter
+Punkt der Streckenaufzeichnung). Als Übernachtung erscheint der letzte Standort eines Tages mit „Übernachtung im
+LKW“ – ändert sich die Übernachtung später, passt sich die Karte an. Für ältere Tage wird der letzte GPS-Punkt des
+Tages genommen. Plätze im Umkreis von 200 m werden zu einem Symbol mit Anzahl zusammengefasst. Antippen zeigt
+Datum, Land und den nächsten Ort (offline aus `assets/places.bin`, GeoNames-Orte ab 1000 Einwohnern, CC BY 4.0;
+erzeugt mit `tools/build_places.py`). Ein-/ausblendbar über den Mond-Knopf.
+
+**Meilensteine:** Werden aus den Daten berechnet (inkl. Datum, an dem sie erreicht wurden). Beim ersten Start
+nach dem Update und nach dem Wiederherstellen einer Sicherung werden bereits erreichte Meilensteine still
+freigeschaltet, ohne Meldungen.
 
 **Streckenaufzeichnung:** Startet automatisch bei „Arbeit beginnen“ und stoppt bei „Arbeit beenden“/„Tour
 beenden“ (abschaltbar). Läuft als Vordergrunddienst mit Benachrichtigung „Strecke wird aufgezeichnet“, nur
@@ -119,17 +132,18 @@ SIGNING_KEYSTORE_PATH=/pfad/zum/keystore.jks SIGNING_PASSWORD=… ./gradlew asse
 
 ## Datenbank und Datensicherung
 
-- Room-Datenbank Version 4 (Arbeitsschichten, Übernachtung, Land-Herkunft, GPS-Strecken in `track_chunks`).
-  Für jede Änderung gibt es eine Migration (1 → 2 → 3 → 4); es wird nie `fallbackToDestructiveMigration` verwendet. Bisherige
+- Room-Datenbank Version 5 (Arbeitsschichten, Übernachtung, Land-Herkunft, GPS-Strecken in `track_chunks`,
+  Standorte beim Arbeitsende in `stop_locations`, Meilensteine in `milestones`).
+  Für jede Änderung gibt es eine Migration (1 → 2 → 3 → 4 → 5); es wird nie `fallbackToDestructiveMigration` verwendet. Bisherige
   Arbeitszeiten pro Tag (auch von Hand an Mitternacht getrennte) werden unverändert als Schichten
   übernommen; die alten Spalten bleiben zusätzlich erhalten.
 - **Vor jeder Migration** legt die App automatisch eine Sicherung an: die unveränderten
   Datenbankdateien im App-Speicher und eine wiederherstellbare Datensicherung unter
   `Download/Fahrtenbuch/` (ab Android 10).
-- `MigrationTest` prüft das Update an Datenbanken im Stand der Versionen 1, 2 und 3 mit echten Einträgen
-  (Gegenprobe: ohne Migration 3 → 4 schlägt das Öffnen fehl).
-- Datensicherung Format-Version 4 (mit GPS-Strecken, Punkte als Base64); Sicherungen der Formate 1–3 lassen
-  sich weiterhin laden – vorhandene Strecken bleiben dabei erhalten.
+- `MigrationTest` prüft das Update an Datenbanken im Stand der Versionen 1 bis 4 mit echten Einträgen
+  (Gegenproben: ohne Migration 3 → 4 bzw. 4 → 5 schlägt das Öffnen fehl).
+- Datensicherung Format-Version 5 (GPS-Strecken als Base64, Übernachtungsorte, Meilensteine); Sicherungen der
+  Formate 1–4 lassen sich weiterhin laden – vorhandene Strecken, Orte und Meilensteine bleiben dabei erhalten.
 
 ## Selbst bauen
 

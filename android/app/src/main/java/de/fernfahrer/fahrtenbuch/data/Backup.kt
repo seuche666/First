@@ -18,6 +18,8 @@ data class WorkSettings(
 data class MapSettings(
     /** GPS-Strecke während der Arbeitszeit aufzeichnen. */
     val trackingEnabled: Boolean = true,
+    /** Übernachtungsorte auf der Karte zeigen. */
+    val showOvernights: Boolean = true,
     /** Breite des aufgedeckten Korridors in Metern (gesamt, also je Hälfte links und rechts). */
     val corridorMeters: Int = DEFAULT_CORRIDOR,
 ) {
@@ -42,6 +44,10 @@ data class BackupData(
     val tracks: List<TrackChunkEntity>? = null,
     /** Einstellungen der Karte; null bei älteren Sicherungen. */
     val mapSettings: MapSettings? = null,
+    /** Standorte beim Arbeitsende / Übernachtungsorte (ab Format 5); null bei älteren Sicherungen. */
+    val stops: List<StopLocationEntity>? = null,
+    /** Erreichte Meilensteine (ab Format 5); null bei älteren Sicherungen. */
+    val milestones: List<MilestoneEntity>? = null,
 )
 
 class BackupFormatException(message: String) : Exception(message)
@@ -71,11 +77,12 @@ object LegacyWork {
  * - 3: Arbeitsschichten (über Mitternacht), Land von Hand gewählt, Übernachtung im LKW,
  *      geschätzte km, Einstellungen zur Arbeitszeit
  * - 4: GPS-Strecken der Karte (Punkte kompakt als Base64) und Einstellungen der Karte
+ * - 5: Standorte beim Arbeitsende (Übernachtungsorte) und erreichte Meilensteine
  * Ältere Sicherungen werden weiterhin gelesen; fehlende Felder erhalten sinnvolle Werte.
  */
 object Backup {
     private const val APP_ID = "fahrtenbuch-android"
-    const val VERSION = 4
+    const val VERSION = 5
 
     fun toJson(data: BackupData): String {
         val root = JSONObject()
@@ -96,7 +103,8 @@ object Backup {
         data.mapSettings?.let {
             root.put(
                 "mapSettings",
-                JSONObject().put("trackingEnabled", it.trackingEnabled).put("corridorMeters", it.corridorMeters),
+                JSONObject().put("trackingEnabled", it.trackingEnabled).put("corridorMeters", it.corridorMeters)
+                    .put("showOvernights", it.showOvernights),
             )
         }
         root.put("tours", JSONArray().apply {
@@ -153,6 +161,26 @@ object Backup {
                             .put("points", encoder.encodeToString(t.data)),
                     )
                 }
+            })
+        }
+        data.stops?.let { stops ->
+            root.put("stops", JSONArray().apply {
+                stops.forEach { st ->
+                    put(
+                        JSONObject()
+                            .put("id", st.id)
+                            .put("date", st.date.toString())
+                            .put("minute", st.minute)
+                            .put("latE5", st.latE5)
+                            .put("lonE5", st.lonE5)
+                            .put("countryCode", st.countryCode.orNull()),
+                    )
+                }
+            })
+        }
+        data.milestones?.let { list ->
+            root.put("milestones", JSONArray().apply {
+                list.forEach { put(JSONObject().put("id", it.id).put("achievedOn", it.achievedOn.toString())) }
             })
         }
         return root.toString(2)
@@ -242,6 +270,7 @@ object Backup {
                 MapSettings(
                     trackingEnabled = it.optBoolean("trackingEnabled", true),
                     corridorMeters = MapSettings.validCorridor(it.optInt("corridorMeters", MapSettings.DEFAULT_CORRIDOR)),
+                    showOvernights = it.optBoolean("showOvernights", true),
                 )
             }
             val tracks = root.optJSONArray("tracks")?.let { arr ->
@@ -261,8 +290,28 @@ object Backup {
                     )
                 }
             }
+            val stops = root.optJSONArray("stops")?.let { arr ->
+                (0 until arr.length()).map { i ->
+                    val st = arr.getJSONObject(i)
+                    StopLocationEntity(
+                        id = st.getLong("id"),
+                        date = LocalDate.parse(st.getString("date")),
+                        minute = st.getInt("minute").coerceIn(0, 1440),
+                        latE5 = st.getInt("latE5").also { require(it in -9_000_000..9_000_000) },
+                        lonE5 = st.getInt("lonE5").also { require(it in -18_000_000..18_000_000) },
+                        countryCode = st.optStringOrNull("countryCode"),
+                    )
+                }
+            }
+            val milestones = root.optJSONArray("milestones")?.let { arr ->
+                (0 until arr.length()).map { i ->
+                    val m = arr.getJSONObject(i)
+                    MilestoneEntity(m.getString("id"), LocalDate.parse(m.getString("achievedOn")))
+                }
+            }
             return BackupData(
                 tours, days, root.optString("driverName", ""), rules, shifts, workSettings, tracks, mapSettings,
+                stops, milestones,
             )
         } catch (e: BackupFormatException) {
             throw e

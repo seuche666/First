@@ -177,7 +177,36 @@ object PreMigrationBackup {
             } else {
                 null
             }
-            BackupData(tours, days, driverName, rules, shifts, tracks = tracks)
+            val stops: List<StopLocationEntity>? = if (hasTable("stop_locations")) {
+                db.rawQuery("SELECT * FROM stop_locations ORDER BY date, minute", null).use { c ->
+                    buildList<StopLocationEntity> {
+                        while (c.moveToNext()) {
+                            add(
+                                StopLocationEntity(
+                                    id = c.long("id")!!,
+                                    date = LocalDate.parse(c.string("date")),
+                                    minute = c.int("minute") ?: 0,
+                                    latE5 = c.int("latE5")!!,
+                                    lonE5 = c.int("lonE5")!!,
+                                    countryCode = c.string("countryCode"),
+                                ),
+                            )
+                        }
+                    }
+                }
+            } else {
+                null
+            }
+            val milestones: List<MilestoneEntity>? = if (hasTable("milestones")) {
+                db.rawQuery("SELECT * FROM milestones", null).use { c ->
+                    buildList<MilestoneEntity> {
+                        while (c.moveToNext()) add(MilestoneEntity(c.string("id")!!, LocalDate.parse(c.string("achievedOn"))))
+                    }
+                }
+            } else {
+                null
+            }
+            BackupData(tours, days, driverName, rules, shifts, tracks = tracks, stops = stops, milestones = milestones)
         }
 
     private fun Cursor.index(name: String) = getColumnIndex(name).takeIf { it >= 0 && !isNull(it) }

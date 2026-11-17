@@ -7,6 +7,7 @@ import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
 import de.fernfahrer.fahrtenbuch.data.TrackRepository
 import de.fernfahrer.fahrtenbuch.ui.map.MapConfig
+import de.fernfahrer.fahrtenbuch.work.DeviceStopLocator
 import de.fernfahrer.fahrtenbuch.work.Tracking
 import de.fernfahrer.fahrtenbuch.work.TrackingService
 import de.fernfahrer.fahrtenbuch.location.LocationProvider
@@ -57,7 +58,10 @@ class FahrtenbuchApp : Application() {
         location = LocationProvider(this)
         reminders = ReminderScheduler(this, settings)
         tracking = Tracking(this, settings)
-        work = WorkController(repository, settings, reminders, location, tracking = tracking)
+        work = WorkController(
+            repository, settings, reminders, location,
+            tracking = tracking, stopLocator = DeviceStopLocator(settings, location, tracks),
+        )
         ReminderScheduler.createChannel(this)
         TrackingService.createChannel(this)
         MapConfig.init(this)

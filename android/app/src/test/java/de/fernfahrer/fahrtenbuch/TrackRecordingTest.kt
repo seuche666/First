@@ -1,7 +1,6 @@
 package de.fernfahrer.fahrtenbuch
 
 import de.fernfahrer.fahrtenbuch.data.TrackChunkEntity
-import de.fernfahrer.fahrtenbuch.domain.geo.CoverageRaster
 import de.fernfahrer.fahrtenbuch.domain.geo.FogGeometry
 import de.fernfahrer.fahrtenbuch.domain.geo.Geo
 import de.fernfahrer.fahrtenbuch.domain.geo.TrackCodec
@@ -17,7 +16,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** Aufzeichnung: Speicherformat, Filter (Abstand, Genauigkeit, Ausreißer, Funkloch), Stücke, Fläche. */
+/** Aufzeichnung: Speicherformat, Filter (Abstand, Genauigkeit, Ausreißer, Funkloch), Stücke, Vereinfachung. */
 class TrackRecordingTest {
 
     // ---------- Hilfen: simulierte Fahrt ----------
@@ -196,46 +195,7 @@ class TrackRecordingTest {
         assertTrue(Geo.distanceM(first.point(first.size - 1), second.point(0)) > 40_000)
     }
 
-    // ---------- Fläche und Vereinfachung ----------
-
-    private fun line(km: Double, lat0: Double = 50.0, step: Double = 40.0, offsetNorthM: Double = 0.0): Pair<DoubleArray, DoubleArray> {
-        val n = (km * 1000 / step).toInt() + 1
-        val xs = DoubleArray(n)
-        val ys = DoubleArray(n)
-        for (i in 0 until n) {
-            val (lat, lon) = at(i * step, offsetNorthM, lat0, 8.0)
-            xs[i] = Geo.mercatorX(lon)
-            ys[i] = Geo.mercatorY(lat)
-        }
-        return xs to ys
-    }
-
-    @Test
-    fun aufgedeckteFlaecheEntsprichtKorridor() {
-        val (xs, ys) = line(10.0)
-        for ((width, expected) in listOf(100 to 1.0, 1000 to 10.0)) {
-            val raster = CoverageRaster(width)
-            raster.addPolyline(xs, ys)
-            // Rechteck 10 km × Breite plus runde Enden
-            val caps = PI * (width / 2000.0) * (width / 2000.0)
-            assertEquals("Breite $width m", expected + caps, raster.areaKm2, (expected + caps) * 0.04)
-        }
-    }
-
-    @Test
-    fun mehrfachBefahreneStreckeZaehltNurEinmal() {
-        val (xs, ys) = line(10.0)
-        val raster = CoverageRaster(100)
-        raster.addPolyline(xs, ys)
-        val once = raster.areaKm2
-        raster.addPolyline(xs.reversedArray(), ys.reversedArray())
-        raster.addPolyline(xs, ys)
-        assertEquals(once, raster.areaKm2, 1e-9)
-        // Zweite Straße 2 km weiter nördlich verdoppelt die Fläche
-        val (xs2, ys2) = line(10.0, offsetNorthM = 2000.0)
-        raster.addPolyline(xs2, ys2)
-        assertEquals(2 * once, raster.areaKm2, once * 0.03)
-    }
+    // ---------- Vereinfachung ----------
 
     @Test
     fun vereinfachungBeimRauszoomen() {

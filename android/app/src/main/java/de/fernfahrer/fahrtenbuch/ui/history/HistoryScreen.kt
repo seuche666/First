@@ -26,12 +26,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -60,15 +58,12 @@ import java.time.YearMonth
 fun HistoryScreen(vm: MainViewModel, onOpenDay: (Long) -> Unit, onAdd: () -> Unit) {
     val days by vm.days.collectAsStateWithLifecycle()
     val workByDate by vm.workByDate.collectAsStateWithLifecycle()
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val groups = remember(days) {
         (days ?: emptyList()).groupBy { YearMonth.from(it.day.date) }.toSortedMap(compareByDescending { it })
     }
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         contentWindowInsets = WindowInsets(0),
-        topBar = { LargeTopAppBar(title = { Text("Verlauf") }, scrollBehavior = scroll) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onAdd,

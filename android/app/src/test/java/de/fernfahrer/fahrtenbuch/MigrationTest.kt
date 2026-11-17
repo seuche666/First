@@ -137,10 +137,91 @@ class MigrationTest {
                 assertEquals(1, tracks.count())
                 assertEquals("AT", tracks.getAllChunks().single().countries)
             }
-            assertEquals(4, room.openHelper.readableDatabase.version)
+            assertEquals(AppDatabase.VERSION, room.openHelper.readableDatabase.version)
         } finally {
             room.close()
         }
+    }
+
+    /** Datenbank im Stand von App-Version 1.0.10 (Datenbank-Version 4) mit Einträgen und einer Strecke. */
+    private fun SQLiteDatabase.fillVersion4() {
+        fillVersion3()
+        val chunk = de.fernfahrer.fahrtenbuch.data.TrackChunks.build(
+            0, 77L, 0,
+            (0 until 50).map { de.fernfahrer.fahrtenbuch.domain.geo.TrackPoint.of(48.0 + it * 0.0004, 11.0, 1_762_700_000L + it * 2) },
+            listOf("DE"),
+        )
+        val v = android.content.ContentValues().apply {
+            put("trackId", chunk.trackId); put("seq", chunk.seq); put("startTime", chunk.startTime); put("endTime", chunk.endTime)
+            put("pointCount", chunk.pointCount); put("minLatE5", chunk.minLatE5); put("minLonE5", chunk.minLonE5)
+            put("maxLatE5", chunk.maxLatE5); put("maxLonE5", chunk.maxLonE5); put("lengthMeters", chunk.lengthMeters)
+            put("countries", chunk.countries); put("data", chunk.data)
+        }
+        insertOrThrow("track_chunks", null, v)
+    }
+
+    @Test
+    fun updateVonVersion4Auf5BehaeltAlleEintraegeUndStrecken() {
+        createDatabase(dbName, 4) { fillVersion4() }
+        val room = openWithRoom(dbName)
+        try {
+            runBlocking {
+                val days = room.dao().getAllDays()
+                assertEquals(3, days.size)
+                assertEquals("Wien", days.first { it.id == 2L }.note)
+                assertEquals(true, days.first { it.id == 2L }.overnightOverride)
+                assertEquals(2, room.dao().getAllShifts().size)
+                assertEquals(2L, room.dao().getRunningShift()?.id)
+                val chunk = room.trackDao().getAllChunks().single()
+                assertEquals(50, chunk.pointCount)
+                assertEquals(50, de.fernfahrer.fahrtenbuch.domain.geo.TrackCodec.decode(chunk.data).size)
+
+                // Neue, leere Tabellen; Einträge lassen sich speichern
+                val stops = room.stopDao()
+                assertTrue(stops.getAllStops().isEmpty())
+                assertTrue(stops.getAllMilestones().isEmpty())
+                stops.insertStop(de.fernfahrer.fahrtenbuch.data.StopLocationEntity(date = LocalDate.parse("2026-11-10"), minute = 1200, latE5 = 4_820_000, lonE5 = 1_637_000, countryCode = "AT"))
+                stops.insertMilestones(listOf(de.fernfahrer.fahrtenbuch.data.MilestoneEntity("km_1000", LocalDate.parse("2026-11-10"))))
+                assertEquals("AT", stops.getAllStops().single().countryCode)
+                assertEquals("km_1000", stops.getAllMilestones().single().id)
+            }
+            assertEquals(5, room.openHelper.readableDatabase.version)
+        } finally {
+            room.close()
+        }
+    }
+
+    /** Gegenprobe: Ohne die Migration 4 → 5 lässt Room die Datenbank nicht öffnen (und löscht nichts). */
+    @Test
+    fun ohneMigration4Auf5SchlaegtDasOeffnenFehl() {
+        createDatabase(dbName, 4) { fillVersion4() }
+        val room = openWithRoom(dbName, arrayOf(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4))
+        try {
+            val error = runCatching { runBlocking { room.dao().getAllDays() } }.exceptionOrNull()
+            assertTrue("Ohne Migration muss das Öffnen fehlschlagen", error is IllegalStateException)
+        } finally {
+            room.close()
+        }
+        SQLiteDatabase.openDatabase(context.getDatabasePath(dbName).path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            assertEquals(4, db.version)
+            db.rawQuery("SELECT COUNT(*) FROM track_chunks", null).use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        }
+    }
+
+    @Test
+    fun sicherungVorUpdateVonVersion4EnthaeltStrecken() {
+        createDatabase(AppDatabase.DB_NAME, 4) { fillVersion4() }
+        var publicBytes: ByteArray? = null
+        val result = PreMigrationBackup.runIfNeeded(context, AppDatabase.DB_NAME, AppDatabase.VERSION, "Max", null) { _, name, bytes ->
+            publicBytes = bytes
+            name
+        }
+        assertEquals(4, result!!.fromVersion)
+        val restored = Backup.fromJson(String(publicBytes!!))
+        assertEquals(3, restored.days.size)
+        assertEquals(2, restored.shifts.size)
+        assertEquals(50, restored.tracks!!.single().pointCount)
+        assertNull(restored.stops)
     }
 
     /** Gegenprobe: Ohne die Migration 3 → 4 lässt Room die alte Datenbank nicht öffnen (und löscht nichts). */

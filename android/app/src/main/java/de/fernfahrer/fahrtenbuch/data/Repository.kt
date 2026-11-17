@@ -334,13 +334,23 @@ class Repository(
     // Datensicherung
     // ---------------------------------------------------------------------------------------------
 
+    // ---------- Standorte beim Arbeitsende, Meilensteine ----------
+
+    val stops: Flow<List<StopLocationEntity>> = db.stopDao().observeStops()
+    suspend fun addStop(stop: StopLocationEntity): Long = db.stopDao().insertStop(stop)
+
+    val milestones: Flow<List<MilestoneEntity>> = db.stopDao().observeMilestones()
+    suspend fun getMilestones(): List<MilestoneEntity> = db.stopDao().getAllMilestones()
+    suspend fun addMilestones(list: List<MilestoneEntity>) = db.stopDao().insertMilestones(list)
+
     suspend fun exportData(): BackupData = BackupData(
         dao.getAllTours(), dao.getAllDays(), shifts = dao.getAllShifts(), tracks = db.trackDao().getAllChunks(),
+        stops = db.stopDao().getAllStops(), milestones = db.stopDao().getAllMilestones(),
     )
 
     /**
-     * Ersetzt alle Daten durch eine Sicherung. Enthält die Sicherung keine Strecken (ältere Formate),
-     * bleiben die vorhandenen Strecken erhalten.
+     * Ersetzt alle Daten durch eine Sicherung. Enthält die Sicherung keine Strecken, Standorte oder
+     * Meilensteine (ältere Formate), bleiben die vorhandenen erhalten.
      */
     suspend fun replaceAll(data: BackupData) = db.withTransaction {
         dao.deleteAllShifts()
@@ -352,6 +362,14 @@ class Repository(
         data.tracks?.let { tracks ->
             db.trackDao().deleteAll()
             tracks.chunked(200).forEach { db.trackDao().insertAll(it) }
+        }
+        data.stops?.let {
+            db.stopDao().deleteAllStops()
+            db.stopDao().insertStops(it)
+        }
+        data.milestones?.let {
+            db.stopDao().deleteAllMilestones()
+            db.stopDao().insertMilestones(it)
         }
     }
 }

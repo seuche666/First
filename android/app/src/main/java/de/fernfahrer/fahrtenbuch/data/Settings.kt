@@ -54,6 +54,7 @@ class Settings(context: Context) {
     private val _map = MutableStateFlow(
         MapSettings(
             trackingEnabled = prefs.getBoolean(KEY_TRACKING, true),
+            showOvernights = prefs.getBoolean(KEY_SHOW_OVERNIGHTS, true),
             corridorMeters = MapSettings.validCorridor(prefs.getInt(KEY_CORRIDOR, MapSettings.DEFAULT_CORRIDOR)),
         ),
     )
@@ -64,8 +65,22 @@ class Settings(context: Context) {
     fun setMapSettings(value: MapSettings) {
         val v = value.copy(corridorMeters = MapSettings.validCorridor(value.corridorMeters))
         _map.value = v
-        prefs.edit().putBoolean(KEY_TRACKING, v.trackingEnabled).putInt(KEY_CORRIDOR, v.corridorMeters).apply()
+        prefs.edit().putBoolean(KEY_TRACKING, v.trackingEnabled).putInt(KEY_CORRIDOR, v.corridorMeters)
+            .putBoolean(KEY_SHOW_OVERNIGHTS, v.showOvernights).apply()
     }
+
+    /** Zuletzt geöffnete Ansicht: true = Karte, false = Fahrtenbuch. */
+    var lastViewMap: Boolean
+        get() = prefs.getBoolean(KEY_LAST_VIEW_MAP, false)
+        set(value) = prefs.edit().putBoolean(KEY_LAST_VIEW_MAP, value).apply()
+
+    /**
+     * Wurden die vorhandenen Daten schon einmal auf Meilensteine geprüft? Beim ersten Mal werden
+     * bereits erreichte Meilensteine still freigeschaltet (ohne Meldungen).
+     */
+    var milestonesInitialized: Boolean
+        get() = prefs.getBoolean(KEY_MILESTONES_INIT, false)
+        set(value) = prefs.edit().putBoolean(KEY_MILESTONES_INIT, value).apply()
 
     /** Wurde die Erklärung zu „Standort immer erlauben“ schon gezeigt? */
     var backgroundLocationExplained: Boolean
@@ -103,6 +118,9 @@ class Settings(context: Context) {
         private const val KEY_REMINDER_SHIFT = "erinnerung_schicht"
         private const val KEY_BACKUP_NOTICE = "hinweis_sicherung"
         private const val KEY_TRACKING = "strecke_aufzeichnen"
+        private const val KEY_SHOW_OVERNIGHTS = "karte_uebernachtungen"
+        private const val KEY_LAST_VIEW_MAP = "ansicht_karte"
+        private const val KEY_MILESTONES_INIT = "meilensteine_geprueft"
         private const val KEY_CORRIDOR = "karte_korridor_m"
         private const val KEY_BACKGROUND_EXPLAINED = "standort_immer_erklaert"
     }

@@ -35,6 +35,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Slider
 import androidx.compose.material.icons.rounded.Work
 import de.fernfahrer.fahrtenbuch.data.WorkSettings
+import de.fernfahrer.fahrtenbuch.data.MapSettings
+import de.fernfahrer.fahrtenbuch.ui.map.TrackingTexts
+import de.fernfahrer.fahrtenbuch.ui.map.rememberTrackingPermissions
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -64,6 +72,8 @@ fun SettingsScreen(vm: MainViewModel) {
     val pending by vm.pendingRestore.collectAsStateWithLifecycle()
     val rules by vm.rules.collectAsStateWithLifecycle()
     val work by vm.workSettings.collectAsStateWithLifecycle()
+    val mapSettings by vm.mapSettings.collectAsStateWithLifecycle()
+    var confirmDeleteTracks by remember { mutableStateOf(false) }
     var name by remember(savedName) { mutableStateOf(savedName) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -142,6 +152,15 @@ fun SettingsScreen(vm: MainViewModel) {
             }
 
             item {
+                MapSettingsCard(
+                    map = mapSettings,
+                    onChange = vm::setMapSettings,
+                    onPermissionsChanged = vm::syncTracking,
+                    onDeleteTracks = { confirmDeleteTracks = true },
+                )
+            }
+
+            item {
                 SectionCard(title = "So zählt die App", icon = Icons.AutoMirrored.Rounded.Rule) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
                         Column(Modifier.weight(1f)) {
@@ -189,7 +208,7 @@ fun SettingsScreen(vm: MainViewModel) {
                         Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            "Kein Konto, kein Server: Alles bleibt offline auf deinem Gerät.",
+                            "Kein Konto, kein Server: Alle Daten bleiben auf deinem Gerät. Internet nur für die Kartenbilder.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -204,6 +223,28 @@ fun SettingsScreen(vm: MainViewModel) {
         }
     }
 
+    if (confirmDeleteTracks) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteTracks = false },
+            icon = { Icon(Icons.Rounded.DeleteForever, null) },
+            title = { Text("Alle Strecken löschen?") },
+            text = {
+                Text(
+                    "Alle aufgezeichneten GPS-Strecken werden gelöscht und die Karte ist wieder komplett " +
+                        "verdeckt. Tage, Touren und Arbeitszeiten bleiben erhalten. Das kann nicht rückgängig " +
+                        "gemacht werden (außer mit einer vorher gespeicherten Datensicherung).",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteTracks = false
+                    vm.deleteAllTracks()
+                }) { Text("Löschen", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDeleteTracks = false }) { Text("Abbrechen") } },
+        )
+    }
+
     pending?.let { data ->
         AlertDialog(
             onDismissRequest = vm::cancelRestore,
@@ -213,8 +254,12 @@ fun SettingsScreen(vm: MainViewModel) {
                 val range = data.days.map { it.date }.let { d ->
                     if (d.isEmpty()) "" else " (${Format.date(d.min())} bis ${Format.date(d.max())})"
                 }
+                val tracksText = data.tracks?.let { t ->
+                    val km = Math.round(t.sumOf { it.lengthMeters } / 1000.0).toInt()
+                    " und GPS-Strecken über ${Format.km(km)}"
+                } ?: ""
                 Text(
-                    "Die Sicherung enthält ${Format.days(data.days.size)}$range.\n\n" +
+                    "Die Sicherung enthält ${Format.days(data.days.size)}$range$tracksText.\n\n" +
                         "Alle aktuellen Einträge auf diesem Handy werden dabei ersetzt.",
                 )
             },
@@ -272,6 +317,77 @@ private fun WorkSettingsCard(work: WorkSettings, onChange: (WorkSettings) -> Uni
                 anyGranted = true,
             )
         }
+    }
+}
+
+/** Streckenaufzeichnung, Korridorbreite, Berechtigungen und Löschen der Strecken. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MapSettingsCard(
+    map: MapSettings,
+    onChange: (MapSettings) -> Unit,
+    onPermissionsChanged: () -> Unit,
+    onDeleteTracks: () -> Unit,
+) {
+    val permissions = rememberTrackingPermissions(onChanged = onPermissionsChanged)
+    SectionCard(title = "Karte", icon = Icons.Rounded.Map) {
+        SettingSwitch(
+            title = "Strecke während der Arbeitszeit aufzeichnen",
+            text = "Startet automatisch bei „Arbeit beginnen“ und stoppt bei „Arbeit beenden“. Funktioniert " +
+                "offline (nur GPS des Handys). Die Punkte bleiben auf dem Handy und sind in der Datensicherung enthalten.",
+            checked = map.trackingEnabled,
+            onChange = { onChange(map.copy(trackingEnabled = it)) },
+        )
+        if (map.trackingEnabled) {
+            if (!permissions.location) {
+                PermissionHint(TrackingTexts.LOCATION_MISSING, "Erlauben", permissions.requestLocation)
+            } else if (!permissions.background) {
+                PermissionHint(TrackingTexts.BACKGROUND_MISSING, "Immer erlauben", permissions.requestBackground)
+            }
+            if (!permissions.batteryOk) {
+                PermissionHint(TrackingTexts.BATTERY, "Ausnahme erlauben", permissions.openBattery)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("Breite der freigelegten Strecke", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Gilt auch für alle bisherigen Strecken. Beim Rauszoomen bleiben die Strecken immer sichtbar.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            MapSettings.CORRIDOR_OPTIONS.forEachIndexed { i, m ->
+                SegmentedButton(
+                    selected = map.corridorMeters == m,
+                    onClick = { onChange(map.copy(corridorMeters = m)) },
+                    shape = SegmentedButtonDefaults.itemShape(i, MapSettings.CORRIDOR_OPTIONS.size),
+                    label = { Text(if (m >= 1000) "${m / 1000} km" else "$m m", maxLines = 1) },
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        OutlinedButton(onClick = onDeleteTracks, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            Icon(Icons.Rounded.DeleteForever, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Alle Strecken löschen")
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Kartendaten © OpenStreetMap-Mitwirkende. Die Kartenbilder werden bei Bedarf aus dem Internet " +
+                "geladen und zwischengespeichert; dabei wird nur der angezeigte Kartenausschnitt abgefragt, " +
+                "nie deine Strecken.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PermissionHint(text: String, action: String, onAction: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+        TextButton(onClick = onAction) { Text(action) }
     }
 }
 

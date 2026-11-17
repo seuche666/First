@@ -12,6 +12,7 @@ import de.fernfahrer.fahrtenbuch.data.Backup
 import de.fernfahrer.fahrtenbuch.data.BackupData
 import de.fernfahrer.fahrtenbuch.data.BackupFormatException
 import de.fernfahrer.fahrtenbuch.data.EndTourResult
+import de.fernfahrer.fahrtenbuch.data.MapSettings
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
 import de.fernfahrer.fahrtenbuch.data.StartResult
@@ -138,6 +139,36 @@ class MainViewModel(
     fun setWorkSettings(value: WorkSettings) {
         settings.setWorkSettings(value)
         viewModelScope.launch { work.onReminderSettingsChanged() }
+    }
+
+    val mapSettings: StateFlow<MapSettings> = settings.map
+    fun setMapSettings(value: MapSettings) {
+        settings.setMapSettings(value)
+        syncTracking()
+    }
+
+    /** Aufzeichnung an Arbeitszeit, Einstellungen und Berechtigungen anpassen. */
+    fun syncTracking() {
+        viewModelScope.launch { work.syncTracking() }
+    }
+
+    /** Alle GPS-Strecken löschen (nach Rückfrage). Tage, Touren und Arbeitszeiten bleiben erhalten. */
+    fun deleteAllTracks() {
+        val tracks = app?.tracks ?: return
+        viewModelScope.launch {
+            try {
+                tracks.deleteAll()
+                showMessage("Alle Strecken wurden gelöscht.")
+            } catch (e: Exception) {
+                showMessage("Löschen fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /** Wurde „Standort immer erlauben“ schon erklärt? */
+    val backgroundLocationExplained: Boolean get() = settings.backgroundLocationExplained
+    fun markBackgroundLocationExplained() {
+        settings.backgroundLocationExplained = true
     }
 
     /** Muss vor dem ersten „Arbeit beginnen“ die Erklärung zu den Berechtigungen gezeigt werden? */
@@ -330,6 +361,7 @@ class MainViewModel(
                     driverName = settings.driverName.value,
                     rules = settings.rules.value,
                     workSettings = settings.work.value,
+                    mapSettings = settings.map.value,
                 )
                 withContext(Dispatchers.IO) {
                     resolver.openOutputStream(uri, "wt")?.use { it.write(Backup.toJson(data).toByteArray()) }
@@ -372,7 +404,9 @@ class MainViewModel(
                 if (data.driverName.isNotBlank()) settings.setDriverName(data.driverName)
                 data.rules?.let { settings.setShortSingleDayAsHalf(it.shortSingleDayAsHalf) }
                 data.workSettings?.let { settings.setWorkSettings(it) }
+                data.mapSettings?.let { settings.setMapSettings(it) }
                 work.onReminderSettingsChanged()
+                work.syncTracking()
                 showMessage("Datensicherung geladen: ${data.days.size} Tage")
             } catch (e: Exception) {
                 showMessage("Wiederherstellen fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")

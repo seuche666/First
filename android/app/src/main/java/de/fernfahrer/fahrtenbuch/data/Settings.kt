@@ -51,6 +51,27 @@ class Settings(context: Context) {
             .apply()
     }
 
+    private val _map = MutableStateFlow(
+        MapSettings(
+            trackingEnabled = prefs.getBoolean(KEY_TRACKING, true),
+            corridorMeters = MapSettings.validCorridor(prefs.getInt(KEY_CORRIDOR, MapSettings.DEFAULT_CORRIDOR)),
+        ),
+    )
+
+    /** Streckenaufzeichnung und Korridorbreite der Karte. */
+    val map: StateFlow<MapSettings> = _map.asStateFlow()
+
+    fun setMapSettings(value: MapSettings) {
+        val v = value.copy(corridorMeters = MapSettings.validCorridor(value.corridorMeters))
+        _map.value = v
+        prefs.edit().putBoolean(KEY_TRACKING, v.trackingEnabled).putInt(KEY_CORRIDOR, v.corridorMeters).apply()
+    }
+
+    /** Wurde die Erklärung zu „Standort immer erlauben“ schon gezeigt? */
+    var backgroundLocationExplained: Boolean
+        get() = prefs.getBoolean(KEY_BACKGROUND_EXPLAINED, false)
+        set(value) = prefs.edit().putBoolean(KEY_BACKGROUND_EXPLAINED, value).apply()
+
     /** Wurde die Erklärung zu den Berechtigungen (Standort, Benachrichtigungen) schon gezeigt? */
     var permissionsExplained: Boolean
         get() = prefs.getBoolean(KEY_PERMISSIONS_EXPLAINED, false)
@@ -81,5 +102,8 @@ class Settings(context: Context) {
         private const val KEY_REMINDER_DUE = "erinnerung_faellig"
         private const val KEY_REMINDER_SHIFT = "erinnerung_schicht"
         private const val KEY_BACKUP_NOTICE = "hinweis_sicherung"
+        private const val KEY_TRACKING = "strecke_aufzeichnen"
+        private const val KEY_CORRIDOR = "karte_korridor_m"
+        private const val KEY_BACKGROUND_EXPLAINED = "standort_immer_erklaert"
     }
 }

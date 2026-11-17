@@ -111,11 +111,59 @@ class BackupAndCsvTest {
     @Test
     fun neueSicherungEnthaeltSchichtenUndEinstellungen() {
         val json = org.json.JSONObject(Backup.toJson(data))
-        assertEquals(3, json.getInt("version"))
+        assertEquals(Backup.VERSION, json.getInt("version"))
         assertEquals(2, json.getJSONArray("shifts").length())
         assertEquals(true, json.getJSONArray("shifts").getJSONObject(1).getBoolean("running"))
         assertEquals(12, json.getJSONObject("workSettings").getInt("reminderHours"))
         assertEquals(false, json.getJSONArray("days").getJSONObject(0).getBoolean("countryManual"))
+    }
+
+    /** Sicherung aus App-Version 1.0.8 (Format 3, ohne Strecken): vorhandene Strecken bleiben beim Laden erhalten. */
+    @Test
+    fun alteSicherungVersion3OhneStreckenWirdGeladen() {
+        val v3 = org.json.JSONObject(Backup.toJson(data)).apply {
+            put("version", 3)
+            remove("tracks")
+            remove("mapSettings")
+        }.toString()
+        val restored = Backup.fromJson(v3)
+        assertEquals(data.days, restored.days)
+        assertEquals(data.shifts, restored.shifts)
+        assertNull(restored.tracks)
+        assertNull(restored.mapSettings)
+    }
+
+    @Test
+    fun sicherungMitStreckenUndKarteneinstellungen() {
+        val points = (0 until 300).map { i ->
+            de.fernfahrer.fahrtenbuch.domain.geo.TrackPoint.of(48.0 + i * 0.0004, 11.0 + i * 0.0001, 1_700_000_000L + i * 2)
+        }
+        val chunk = de.fernfahrer.fahrtenbuch.data.TrackChunks.build(5, 99L, 0, points, listOf("DE", "AT"))
+        val withTracks = data.copy(
+            tracks = listOf(chunk),
+            mapSettings = de.fernfahrer.fahrtenbuch.data.MapSettings(trackingEnabled = false, corridorMeters = 1000),
+        )
+        val json = Backup.toJson(withTracks)
+        val restored = Backup.fromJson(json)
+        assertEquals(withTracks.mapSettings, restored.mapSettings)
+        val t = restored.tracks!!.single()
+        assertEquals(99L, t.trackId)
+        assertEquals(300, t.pointCount)
+        assertEquals("AT,DE", t.countries)
+        assertEquals(chunk.lengthMeters, t.lengthMeters, 0.001)
+        assertEquals(chunk.minLatE5 to chunk.maxLonE5, t.minLatE5 to t.maxLonE5)
+        assertTrue(chunk.data.contentEquals(t.data))
+        assertEquals(points, de.fernfahrer.fahrtenbuch.domain.geo.TrackCodec.decode(t.data).toList())
+        // Kompakt: deutlich unter 10 Byte pro Punkt (Base64 eingerechnet)
+        assertTrue(org.json.JSONObject(json).getJSONArray("tracks").getJSONObject(0).getString("points").length < 300 * 10)
+    }
+
+    @Test(expected = BackupFormatException::class)
+    fun beschaedigteStreckeWirdAbgelehnt() {
+        val json = org.json.JSONObject(Backup.toJson(data)).apply {
+            put("tracks", org.json.JSONArray().put(org.json.JSONObject().put("trackId", 1).put("seq", 0).put("points", "AAAA")))
+        }.toString()
+        Backup.fromJson(json)
     }
 
     @Test

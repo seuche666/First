@@ -19,20 +19,25 @@ kein Login. Berechnet keine Steuerbeträge.
 
 ## Aufbau der App (`android/app/src/main/java/de/fernfahrer/fahrtenbuch/`)
 
-- `data/` – Room-Datenbank (`AppDatabase`, Version **3**), Tabellen `days`, `tours`, `work_shifts`;
+- `data/` – Room-Datenbank (`AppDatabase`, Version **4**), Tabellen `days`, `tours`, `work_shifts`,
+  `track_chunks` (GPS-Strecken, Punkte kompakt als BLOB; `TrackRepository`, `TrackChunks`);
   `Repository` (gesamte Speicherlogik: Touren, Arbeitsschichten, km-Übernahme, Tour beenden);
-  `Backup` (JSON-Datensicherung, Format **3**, liest 1 und 2); `PreMigrationBackup` (Sicherung vor
+  `Backup` (JSON-Datensicherung, Format **4** mit Strecken, liest 1–3); `PreMigrationBackup` (Sicherung vor
   jeder Migration); `Settings` (SharedPreferences)
 - `domain/` – reine Logik ohne Android: `Classifier` (voll/halb/Firmenregel/Übernachtung),
   `WorkSplitter` (Schichten an Mitternacht teilen, km anteilig verteilen), `Stats`, `Period`,
-  `Countries`, `Format`
+  `Countries`, `Format`; `domain/geo/`: `TrackFilter` (Punkte alle 30–50 m, ungenaue/Ausreißer verwerfen),
+  `TrackCodec` (Delta-Varint), `Simplify`, `FogGeometry` (Detailstufen + Gruppen), `CoverageRaster` (km²)
 - `export/` – PDF (`PdfExporter`, Android `PdfDocument`) und CSV (Excel, Semikolon, BOM), Teilen
 - `location/` – `CountryLocator` (Offline-Ländererkennung aus `assets/country_borders.bin`,
   Natural Earth 1:10m, erzeugt mit `android/tools/build_country_borders.py`), `LocationProvider`
   (einzelne GPS-Abfrage, kein Dauer-GPS)
-- `work/` – `WorkController` (Arbeit beginnen/beenden, Tour beenden, GPS-Land, Erinnerung),
+- `work/` – `WorkController` (Arbeit beginnen/beenden, Tour beenden, GPS-Land, Erinnerung, Aufzeichnung),
+  `TrackingService` (Vordergrunddienst Typ location, Plattform-GPS), `TrackRecorder`, `Tracking` (Start/Stopp,
+  Berechtigungen, Akku-Optimierung),
   `ReminderScheduler`/`ReminderReceiver` (Erinnerung nach 15 Std.), `BootReceiver`
-- `ui/` – Compose-Bildschirme: `home` (Start), `history` (Verlauf), `stats` (Auswertung),
+- `ui/` – Compose-Bildschirme: `home` (Start), `history` (Verlauf), `map` (Fog-of-War-Karte mit osmdroid,
+  `FogRenderer`/`FogOverlay`, `MapViewModel`, `MapConfig` mit User-Agent/Cache), `stats` (Auswertung),
   `settings`, `editor` (Tag bearbeiten, Schicht-Dialog), `components` (km-Dialog,
   Berechtigungs-Erklärung, Länderauswahl …), `MainViewModel`, `AppRoot` (Navigation)
 
@@ -78,6 +83,12 @@ Hinweise für die Cloud-Umgebung:
 
 ## Zuletzt geändert
 
+- **Fog-of-War-Karte (DB v4, Backup-Format 4):** Reiter „Karte“ (osmdroid + OSM-Kacheln), Nebel mit weichem
+  Rand, Korridor 100 m/500 m/1 km/5 km, Aufzeichnung als Vordergrunddienst während der Arbeitszeit,
+  Statistik (km², Länder, GPS-km), „Alle Strecken löschen“. Neu: Berechtigungen `INTERNET` (nur Kacheln),
+  `ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE_LOCATION`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
+  Robolectric-Tests mit echter Grafik (`@GraphicsMode(NATIVE)`) für den Nebel.
+
 - **PR #6 / Release 1.0.8:** Arbeitszeit als Schichten über Mitternacht (automatische Teilung),
   Start-km automatisch, km-Abfrage bei „Arbeit beenden“/„Tour beenden“, Erinnerung nach 15 Std.,
   Land per GPS offline (Handauswahl hat Vorrang), Übernachtung im LKW, Datenbank v3 mit Migration
@@ -88,13 +99,4 @@ Hinweise für die Cloud-Umgebung:
 
 ## Offen / geplant
 
-- **Fog-of-War-Karte** (noch nicht begonnen, Nutzer hat den Start noch nicht bestätigt). Abgestimmter
-  Plan: GPS-Aufzeichnung nur während laufender Arbeitszeit als Vordergrunddienst (Plattform-GPS, kein
-  Google), Punkt alle 30–50 m, ungenaue Punkte verwerfen; Reiter „Karte“ mit osmdroid +
-  OpenStreetMap-Standardkacheln (Attribution, eigener User-Agent, kein Massen-Download); dunkelgrauer
-  Nebel mit weichen Rändern, Korridor 100 m/500 m/1 km/5 km (Mindestbreite in Pixeln), Knöpfe
-  „Mein Standort“ und „Europa“; Statistik (aufgedeckte km², befahrene Länder, GPS-Strecke); Land
-  jedes Tages aus letztem Punkt vor 24 Uhr (Handauswahl hat Vorrang); Strecken kompakt speichern und
-  immer in die Datensicherung; „Alle Strecken löschen“ mit Rückfrage; Berechtigungen inkl.
-  „Immer erlauben“ erklären, Hinweis Akku-Optimierung; abschaltbar; eigener PR, neue DB-Version mit
-  Migration.
+- Land jedes Tages aus dem letzten GPS-Punkt vor 24 Uhr ableiten (war im ersten Karten-Plan, noch nicht umgesetzt).

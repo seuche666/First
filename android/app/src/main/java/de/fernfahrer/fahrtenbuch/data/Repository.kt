@@ -334,8 +334,14 @@ class Repository(
     // Datensicherung
     // ---------------------------------------------------------------------------------------------
 
-    suspend fun exportData(): BackupData = BackupData(dao.getAllTours(), dao.getAllDays(), shifts = dao.getAllShifts())
+    suspend fun exportData(): BackupData = BackupData(
+        dao.getAllTours(), dao.getAllDays(), shifts = dao.getAllShifts(), tracks = db.trackDao().getAllChunks(),
+    )
 
+    /**
+     * Ersetzt alle Daten durch eine Sicherung. Enthält die Sicherung keine Strecken (ältere Formate),
+     * bleiben die vorhandenen Strecken erhalten.
+     */
     suspend fun replaceAll(data: BackupData) = db.withTransaction {
         dao.deleteAllShifts()
         dao.deleteAllDays()
@@ -343,5 +349,9 @@ class Repository(
         dao.insertTours(data.tours)
         dao.insertDays(data.days)
         dao.insertShifts(data.shifts)
+        data.tracks?.let { tracks ->
+            db.trackDao().deleteAll()
+            tracks.chunked(200).forEach { db.trackDao().insertAll(it) }
+        }
     }
 }

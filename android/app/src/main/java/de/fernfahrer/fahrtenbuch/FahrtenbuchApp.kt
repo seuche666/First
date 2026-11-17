@@ -5,6 +5,10 @@ import de.fernfahrer.fahrtenbuch.data.AppDatabase
 import de.fernfahrer.fahrtenbuch.data.PreMigrationBackup
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
+import de.fernfahrer.fahrtenbuch.data.TrackRepository
+import de.fernfahrer.fahrtenbuch.ui.map.MapConfig
+import de.fernfahrer.fahrtenbuch.work.Tracking
+import de.fernfahrer.fahrtenbuch.work.TrackingService
 import de.fernfahrer.fahrtenbuch.location.LocationProvider
 import de.fernfahrer.fahrtenbuch.work.ReminderScheduler
 import de.fernfahrer.fahrtenbuch.work.WorkController
@@ -19,6 +23,12 @@ class FahrtenbuchApp : Application() {
     lateinit var reminders: ReminderScheduler
         private set
     lateinit var work: WorkController
+        private set
+    lateinit var tracks: TrackRepository
+        private set
+    lateinit var location: LocationProvider
+        private set
+    lateinit var tracking: Tracking
         private set
 
     /** „Arbeit beenden“ aus der Benachrichtigung: Zeitpunkt des Tippens, bis die App ihn abholt. */
@@ -41,9 +51,15 @@ class FahrtenbuchApp : Application() {
                 ?: "Vor dem Update wurde eine Sicherung im App-Speicher angelegt."
         }
 
-        repository = Repository(AppDatabase.create(this), settings.rules)
+        val db = AppDatabase.create(this)
+        repository = Repository(db, settings.rules)
+        tracks = TrackRepository(db)
+        location = LocationProvider(this)
         reminders = ReminderScheduler(this, settings)
-        work = WorkController(repository, settings, reminders, LocationProvider(this))
+        tracking = Tracking(this, settings)
+        work = WorkController(repository, settings, reminders, location, tracking = tracking)
         ReminderScheduler.createChannel(this)
+        TrackingService.createChannel(this)
+        MapConfig.init(this)
     }
 }

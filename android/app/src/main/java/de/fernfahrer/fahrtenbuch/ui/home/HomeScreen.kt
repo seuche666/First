@@ -83,6 +83,7 @@ fun HomeScreen(vm: MainViewModel, onOpenEditor: (id: Long, mode: EditorMode) -> 
     val workByDate by vm.workByDate.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val workSettings by vm.workSettings.collectAsStateWithLifecycle()
+    val mapSettings by vm.mapSettings.collectAsStateWithLifecycle()
     val all = days ?: emptyList()
     val today = LocalDate.now()
     val todayEntry = all.firstOrNull { it.day.date == today }
@@ -99,6 +100,9 @@ fun HomeScreen(vm: MainViewModel, onOpenEditor: (id: Long, mode: EditorMode) -> 
         alreadyExplained = { vm.permissionsExplained },
         markExplained = vm::markPermissionsExplained,
         onStart = vm::startWork,
+        tracking = mapSettings.trackingEnabled,
+        backgroundExplained = { vm.backgroundLocationExplained },
+        markBackgroundExplained = vm::markBackgroundLocationExplained,
     )
 
     LazyColumn(

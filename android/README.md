@@ -4,7 +4,8 @@ Native Android-App (Kotlin, Jetpack Compose, Material 3), mit der du für die St
 zählst, **wie viele Tage du unterwegs warst**: volle und halbe Tage in Deutschland und je Land
 im Ausland, dazu die gefahrenen Kilometer. Die App zählt nur, sie berechnet keine Steuerbeträge.
 
-- Komplett **offline**, keine Anmeldung, kein Server. Alle Daten liegen in einer Room-Datenbank auf dem Handy.
+- **Offline**, keine Anmeldung, kein Server. Alle Daten liegen in einer Room-Datenbank auf dem Handy.
+  Internet wird nur für die Kartenbilder von OpenStreetMap genutzt (es werden keine eigenen Daten übertragen).
 - Komplett auf Deutsch, helles und dunkles Design, dynamische Farben (Material You ab Android 12).
 - Mindestversion: Android 8.0.
 
@@ -18,7 +19,8 @@ im Ausland, dazu die gefahrenen Kilometer. Die App zählt nur, sie berechnet kei
 | **Verlauf** | Alle Tage nach Monaten mit Arbeitszeit, antippen zum Bearbeiten oder Löschen, Tage nachtragen. |
 | **Auswertung** | Woche, Monat, Jahr oder gesamt. Volle und halbe Tage in Deutschland und je Auslandsland, Tage gesamt, km, Diagramme „Tage pro Land“ und „Kilometer pro Tag/Woche/Monat/Jahr“. |
 | **Export** | Jahresübersicht als **PDF** und **CSV** (für Excel) über das Android-Teilen-Menü, mit Arbeitszeiten, Begründung je Tag und der aktiven Zählregel. |
-| **Datensicherung** | Alle Daten als Datei speichern und wiederherstellen (für einen Handywechsel). |
+| **Karte** | Fog-of-War-Karte: anfangs dunkelgrau verdeckt, überall wo du mit dem LKW gefahren bist freigelegt. Darunter aufgedeckte Fläche (km²), befahrene Länder und Strecke laut GPS. |
+| **Datensicherung** | Alle Daten (inkl. GPS-Strecken) als Datei speichern und wiederherstellen (für einen Handywechsel). |
 
 ### So ordnet die App Tage ein
 
@@ -56,6 +58,24 @@ immer Vorrang. Abschaltbar in den Einstellungen.
 Rückreisetag). Anzahl in Auswertung, PDF und CSV.
 
 Eine Tour, die am selben Tag beginnt und endet, zählt wie eine eintägige Fahrt.
+
+**Karte (Fog of War):** Eigener Reiter „Karte“ mit OpenStreetMap-Karte (osmdroid, ohne Google, ohne
+API-Schlüssel). Darüber liegt dunkelgrauer Nebel, der entlang der gefahrenen Strecken mit weichem Rand
+freigelegt wird. Breite des Korridors in den Einstellungen: 100 m (Standard), 500 m, 1 km oder 5 km – wirkt
+rückwirkend, weil die Rohpunkte gespeichert sind. Beim Rauszoomen bleibt eine Mindestbreite von ein paar
+Pixeln; die Strecken werden je Zoomstufe vereinfacht, damit die Karte auch mit vielen Monaten Daten flüssig
+bleibt. Knöpfe „Mein Standort“ und „Europa“. Namensnennung „© OpenStreetMap-Mitwirkende“ mit Link; eigener
+User-Agent, Kacheln werden zwischengespeichert, kein Massen-Download (Nutzungsbedingungen der OSM-Kacheln).
+
+**Streckenaufzeichnung:** Startet automatisch bei „Arbeit beginnen“ und stoppt bei „Arbeit beenden“/„Tour
+beenden“ (abschaltbar). Läuft als Vordergrunddienst mit Benachrichtigung „Strecke wird aufgezeichnet“, nur
+mit dem GPS des Handys – funktioniert komplett offline, auch in Funklöchern. Messung jede Sekunde, gespeichert
+wird etwa alle 30–50 m; ungenaue Messungen (> 25 m Ungenauigkeit) und Ausreißer werden verworfen, nach einer
+Unterbrechung wird nur plausibel verbunden. Die Punkte werden kompakt (≈ 3–4 Byte pro Punkt) lokal gespeichert
+und alle 10 Punkte gesichert. Die App erklärt die Standort-Berechtigung inkl. „Immer erlauben“ (nötig, damit
+Android die Aufzeichnung nach Neustart/Update fortsetzen kann) und weist auf die Akku-Optimierung hin (Knopf
+direkt zur Android-Einstellung). Ohne Berechtigung funktioniert der Rest der App normal. In den Einstellungen:
+„Alle Strecken löschen“ (mit Rückfrage).
 
 ## APK herunterladen und installieren
 
@@ -99,15 +119,17 @@ SIGNING_KEYSTORE_PATH=/pfad/zum/keystore.jks SIGNING_PASSWORD=… ./gradlew asse
 
 ## Datenbank und Datensicherung
 
-- Room-Datenbank Version 3 (Arbeitsschichten, Übernachtung, Land-Herkunft). Für jede Änderung gibt es
-  eine Migration (1 → 2 → 3); es wird nie `fallbackToDestructiveMigration` verwendet. Bisherige
+- Room-Datenbank Version 4 (Arbeitsschichten, Übernachtung, Land-Herkunft, GPS-Strecken in `track_chunks`).
+  Für jede Änderung gibt es eine Migration (1 → 2 → 3 → 4); es wird nie `fallbackToDestructiveMigration` verwendet. Bisherige
   Arbeitszeiten pro Tag (auch von Hand an Mitternacht getrennte) werden unverändert als Schichten
   übernommen; die alten Spalten bleiben zusätzlich erhalten.
 - **Vor jeder Migration** legt die App automatisch eine Sicherung an: die unveränderten
   Datenbankdateien im App-Speicher und eine wiederherstellbare Datensicherung unter
   `Download/Fahrtenbuch/` (ab Android 10).
-- `MigrationTest` prüft das Update an Datenbanken im Stand der Versionen 1 und 2 mit echten Einträgen.
-- Datensicherung Format-Version 3; Sicherungen der Formate 1 und 2 lassen sich weiterhin laden.
+- `MigrationTest` prüft das Update an Datenbanken im Stand der Versionen 1, 2 und 3 mit echten Einträgen
+  (Gegenprobe: ohne Migration 3 → 4 schlägt das Öffnen fehl).
+- Datensicherung Format-Version 4 (mit GPS-Strecken, Punkte als Base64); Sicherungen der Formate 1–3 lassen
+  sich weiterhin laden – vorhandene Strecken bleiben dabei erhalten.
 
 ## Selbst bauen
 
@@ -125,6 +147,8 @@ cd android
 app/src/main/java/de/fernfahrer/fahrtenbuch/
 ├── data/      Room-Datenbank (Tage, Touren), Repository, Datensicherung, Einstellungen
 ├── domain/    Einordnung (voll/halb), Zeiträume, Auswertung, Länder, Formatierung
+│   └── geo/   GPS-Filter, Speicherformat, Vereinfachung, Nebel-Geometrie, Flächenberechnung
 ├── export/    PDF- und CSV-Export, Teilen
-└── ui/        Compose-Oberfläche: Heute, Verlauf, Auswertung, Einstellungen, Eingabe
+├── work/      Arbeitszeit, Erinnerung, Streckenaufzeichnung (Vordergrunddienst)
+└── ui/        Compose-Oberfläche: Heute, Verlauf, Karte, Auswertung, Einstellungen, Eingabe
 ```

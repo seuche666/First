@@ -26,6 +26,8 @@ class WorkController(
     private val reminders: ReminderScheduler,
     private val location: LocationProvider,
     private val clock: () -> LocalDateTime = LocalDateTime::now,
+    /** Streckenaufzeichnung für die Karte (nur während der Arbeitszeit). */
+    private val tracking: TrackingControl = TrackingControl.NONE,
 ) {
     /** Hintergrundaufgaben (GPS), die weiterlaufen, auch wenn ein Bildschirm geschlossen wird. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -41,6 +43,7 @@ class WorkController(
         val result = repo.startWork(at)
         if (result is StartResult.Started) {
             reminders.scheduleFor(result.shift, now())
+            tracking.sync(workRunning = true)
             detectCountryLater(at.toLocalDate())
         }
         return result
@@ -49,6 +52,7 @@ class WorkController(
     suspend fun endWork(at: LocalDateTime, km: Int?): WorkShiftEntity? {
         val ended = repo.endWork(at, km) ?: return null
         reminders.cancel()
+        tracking.sync(workRunning = false)
         detectCountryLater(ended.endDate ?: at.toLocalDate())
         return ended
     }
@@ -56,7 +60,10 @@ class WorkController(
     suspend fun endTour(at: LocalDateTime, km: Int?): EndTourResult {
         val result = repo.endTour(at, km)
         if (result is EndTourResult.Ended) {
-            if (result.endedShift != null) reminders.cancel()
+            if (result.endedShift != null) {
+                reminders.cancel()
+                tracking.sync(workRunning = false)
+            }
             detectCountryLater(at.toLocalDate())
         }
         return result
@@ -64,7 +71,10 @@ class WorkController(
 
     /** Beim Öffnen der App: neue Tage einer laufenden Arbeitszeit anlegen, Erinnerung sicherstellen. */
     suspend fun onForeground() {
-        val shift = repo.getRunningShift() ?: return
+        val shift = repo.getRunningShift()
+        // Aufzeichnung passend zur Arbeitszeit (z. B. nach Neustart des Handys oder Update wieder aufnehmen)
+        tracking.sync(workRunning = shift != null)
+        if (shift == null) return
         val created = repo.syncRunningWork(now())
         reminders.ensureScheduled(shift)
         if (now().toLocalDate() in created) detectCountryLater(now().toLocalDate())
@@ -74,6 +84,11 @@ class WorkController(
     suspend fun onReminderSettingsChanged() {
         val shift = repo.getRunningShift()
         if (shift != null) reminders.scheduleFor(shift, now()) else reminders.cancel()
+    }
+
+    /** Einstellungen der Karte oder Berechtigungen geändert, Arbeitszeit von Hand bearbeitet. */
+    suspend fun syncTracking() {
+        tracking.sync(workRunning = repo.getRunningShift() != null)
     }
 
     /** Ermittelt das Land per GPS im Hintergrund und übernimmt es, falls nicht von Hand gewählt. */

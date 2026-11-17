@@ -1,4 +1,8 @@
-# CLAUDE.md – Fahrtenbuch für Fernfahrer
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+# Fahrtenbuch für Fernfahrer
 
 Kurzübersicht für neue Sitzungen. Der Nutzer schreibt Deutsch, ist kein Entwickler und arbeitet
 meist vom Tablet/Handy aus. Antworten auf Deutsch, in einfachen Worten.
@@ -14,8 +18,9 @@ meist vom Tablet/Handy aus. Antworten auf Deutsch, in einfachen Worten.
 ## Zweck der App
 
 Zählt für die Steuererklärung eines Fernfahrers die Tage unterwegs (voll/halb, je Land),
-Kilometer, Arbeitszeit für die Firma und Übernachtungen im LKW. Komplett offline, kein Server,
-kein Login. Berechnet keine Steuerbeträge.
+Kilometer, Arbeitszeit für die Firma und Übernachtungen im LKW; dazu eine Fog-of-War-Karte der
+gefahrenen Strecken mit Übernachtungsplätzen und Meilensteinen. Kein Server, kein Login, alle Daten
+lokal; Internet nur für die OpenStreetMap-Kartenkacheln. Berechnet keine Steuerbeträge.
 
 ## Aufbau der App (`android/app/src/main/java/de/fernfahrer/fahrtenbuch/`)
 
@@ -48,6 +53,30 @@ kein Login. Berechnet keine Steuerbeträge.
   `settings`, `editor` (Tag bearbeiten, Schicht-Dialog), `components` (km-Dialog,
   Berechtigungs-Erklärung, Länderauswahl …), `MainViewModel`, `AppRoot` (Navigation)
 
+## Zusammenspiel (über mehrere Dateien)
+
+- **Einstieg:** `FahrtenbuchApp.onCreate` erzeugt alles von Hand (keine DI): zuerst
+  `PreMigrationBackup.runIfNeeded`, dann `AppDatabase`, `Repository`, `TrackRepository`,
+  `LocationProvider`, `ReminderScheduler`, `Tracking`, `WorkController`, `MapConfig.init`.
+  ViewModels holen sich diese Objekte über ihre `Factory` aus der App.
+- **Arbeitszeit ist der zentrale Auslöser:** Alle Wege zu „Arbeit beginnen/beenden“ und „Tour beenden“
+  (Startbildschirm, Benachrichtigung, Editor) laufen über `WorkController`. Er plant die Erinnerung,
+  startet/stoppt per `TrackingControl.sync()` den `TrackingService`, ermittelt das Land per GPS und
+  speichert über `StopLocator` den Standort beim Arbeitsende. `onForeground()` (beim Öffnen der App)
+  und `BootReceiver` gleichen alles wieder an die laufende Schicht an.
+- **Einordnung der Tage wird nie gespeichert,** sondern immer neu berechnet:
+  `Repository.classifiedDays` = `Classifier.classifyAll(days, tours, rules)`. Darauf bauen Auswertung,
+  Export, Übernachtungsplätze (`ClassifiedDay.overnight`) und Meilensteine auf.
+- **Karte:** `TrackingService` → `TrackRecorder` (Filter `TrackFilter`, Stücke à 500 Punkte, jedes Folgestück
+  beginnt mit dem letzten Punkt des vorigen) → `track_chunks`. `MapViewModel` beobachtet nur die Metadaten,
+  dekodiert geänderte Stücke neu und baut `FogGeometry`; `FogOverlay`/`FogRenderer` zeichnen den Nebel.
+  Übernachtungsplätze = Übernachtungstage + `stop_locations` (sonst letzter GPS-Punkt des Tages).
+- **Meilensteine:** `MainViewModel` berechnet sie laufend aus Tagen und Strecken (`Milestones.evaluate`),
+  `MilestoneTracker` speichert neue in `milestones` und entscheidet, ob eine Meldung erscheint.
+- **Datensicherung:** Neue Tabellen/Felder müssen an drei Stellen ergänzt werden: `Backup` (JSON hin und
+  zurück), `Repository.exportData`/`replaceAll` und `PreMigrationBackup.readOldDatabase` (liest alte
+  Datenbanken roh per SQL, Tabellen/Spalten jeweils optional).
+
 ## Wichtige Regeln (unbedingt einhalten)
 
 1. **Room-Migrationen nie destruktiv.** Jede Schemaänderung bekommt eine eigene `Migration` in
@@ -74,8 +103,23 @@ kein Login. Berechnet keine Steuerbeträge.
 ```bash
 cd android
 ./gradlew testDebugUnitTest      # Unit- und Robolectric-Tests (Migration, Repository, Erinnerung …)
-./gradlew assembleRelease        # ohne Signier-Variablen: app-release-unsigned.apk
+./gradlew testDebugUnitTest --tests '*MigrationTest'                       # eine Testklasse
+./gradlew testDebugUnitTest --tests '*MigrationTest.updateVonVersion4Auf5*' # ein einzelner Test
+./gradlew assembleRelease        # ohne Signier-Variablen: app-release-unsigned.apk (mit R8)
 ```
+
+Kein eigener Lint-Schritt; `assembleRelease` führt `lintVitalRelease` aus. Testergebnisse:
+`app/build/test-results/testDebugUnitTest/*.xml`.
+
+Tests (alle unter `app/src/test`, kein Gerät nötig):
+- Robolectric-Tests laufen mit `@Config(sdk = [34])`; der Nebel und die Kartensymbole mit
+  `@GraphicsMode(NATIVE)` (echte Grafik, Pixel werden geprüft).
+- `MigrationTest` legt alte Datenbanken exakt nach `app/schemas/…/<n>.json` an (Arbeitsverzeichnis der
+  Tests ist `android/app`, daher relative Pfade wie `schemas/…` oder `src/main/assets/places.bin`).
+- GPS im Test: `ShadowLocationManager.simulateLocation` filtert nach Mindestintervall – den Messungen
+  daher steigende `elapsedRealtimeNanos` geben (siehe `TrackingServiceTest`).
+- `WorkController` hat mehrere optionale Lambda-Parameter (`clock`, `tracking`, `stopLocator`); im Test
+  immer benannt übergeben (`clock = { now }`), sonst bindet die nachgestellte Lambda an den letzten.
 
 Hinweise für die Cloud-Umgebung:
 - Android-SDK liegt (falls vorhanden) unter `/opt/android-sdk`; sonst Kommandozeilen-Tools von
@@ -85,8 +129,13 @@ Hinweise für die Cloud-Umgebung:
   (`~/.gradle/init.d/`), das den Spiegel `https://maven-central.storage-download.googleapis.com/maven2/`
   für Plugins, Abhängigkeiten und `robolectric.dependency.repo.url` einträgt. Nicht ins Projekt
   übernehmen.
-- Oberfläche prüfen: temporärer Robolectric-Screenshot-Test (nicht committen). PDF-Erzeugung lässt
-  sich unter Robolectric nicht testen.
+- Oberfläche prüfen: temporärer Robolectric-Screenshot-Test (nicht committen), z. B.
+  `Robolectric.buildActivity(MainActivity::class.java).setup()` mit `@GraphicsMode(NATIVE)`, danach
+  `window.decorView.draw(Canvas(bitmap))`. Kartenkacheln laden dort nicht. PDF-Erzeugung lässt sich unter
+  Robolectric nicht testen.
+- Signatur eines Releases prüfen: `apksigner verify --print-certs <apk>` (build-tools 35.0.0).
+- Datendateien in `assets/` werden mit den Skripten in `android/tools/` erzeugt (Quellen und Lizenzen im
+  Kopf der Skripte); die Ergebnisdateien sind eingecheckt.
 
 ## Zuletzt geändert
 

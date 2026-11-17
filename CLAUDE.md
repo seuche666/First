@@ -22,36 +22,102 @@ Kilometer, Arbeitszeit für die Firma und Übernachtungen im LKW; dazu eine Fog-
 gefahrenen Strecken mit Übernachtungsplätzen und Meilensteinen. Kein Server, kein Login, alle Daten
 lokal; Internet nur für die OpenStreetMap-Kartenkacheln. Berechnet keine Steuerbeträge.
 
-## Aufbau der App (`android/app/src/main/java/de/fernfahrer/fahrtenbuch/`)
+## Aufbau der App – welche Datei wofür (`android/app/src/main/java/de/fernfahrer/fahrtenbuch/`)
 
-- `data/` – Room-Datenbank (`AppDatabase`, Version **5**), Tabellen `days`, `tours`, `work_shifts`,
-  `track_chunks` (GPS-Strecken, Punkte kompakt als BLOB; `TrackRepository`, `TrackChunks`),
-  `stop_locations` (Standort bei „Arbeit beenden“ → Übernachtungsorte), `milestones` (`StopDao`);
-  `Repository` (gesamte Speicherlogik: Touren, Arbeitsschichten, km-Übernahme, Tour beenden);
-  `Backup` (JSON-Datensicherung, Format **5** mit Strecken, Orten, Meilensteinen, liest 1–4); `PreMigrationBackup` (Sicherung vor
-  jeder Migration); `Settings` (SharedPreferences)
-- `domain/` – reine Logik ohne Android: `Classifier` (voll/halb/Firmenregel/Übernachtung),
-  `WorkSplitter` (Schichten an Mitternacht teilen, km anteilig verteilen), `Stats`, `Period`,
-  `Countries`, `Format`; `domain/geo/`: `TrackFilter` (Punkte alle 30–50 m, ungenaue/Ausreißer verwerfen),
-  `TrackCodec` (Delta-Varint), `Simplify`, `FogGeometry` (Detailstufen + Gruppen), `Overnights`
-  (Übernachtungsplätze, Zusammenfassen im Umkreis 200 m); `Milestones` (Berechnung mit Datum),
-  `MilestoneTracker` (erstes Mal und nach Wiederherstellen still freischalten)
-- `export/` – PDF (`PdfExporter`, Android `PdfDocument`) und CSV (Excel, Semikolon, BOM), Teilen
-- `location/` – `CountryLocator` (Offline-Ländererkennung aus `assets/country_borders.bin`,
-  Natural Earth 1:10m, erzeugt mit `android/tools/build_country_borders.py`), `PlaceLocator` (nächster Ort
-  offline aus `assets/places.bin`, GeoNames cities1000, erzeugt mit `android/tools/build_places.py`), `LocationProvider`
-  (einzelne GPS-Abfrage, kein Dauer-GPS)
-- `work/` – `WorkController` (Arbeit beginnen/beenden, Tour beenden, GPS-Land, Erinnerung, Aufzeichnung),
-  `TrackingService` (Vordergrunddienst Typ location, Plattform-GPS), `TrackRecorder`, `Tracking` (Start/Stopp,
-  Berechtigungen, Akku-Optimierung), `StopLocator` (Position beim Arbeitsende),
-  `ReminderScheduler`/`ReminderReceiver` (Erinnerung nach 15 Std.), `BootReceiver`
-- `ui/` – `AppRoot`: Kopfzeile mit Titel + Zahnrad (Einstellungen) und Kacheln „Fahrtenbuch“/„Karte“
-  (letzte Ansicht in `Settings.lastViewMap`); untere Leiste nur im Fahrtenbuch (Heute, Verlauf, Auswertung).
-  Bildschirme: `home` (Start), `history` (Verlauf), `map` (Fog-of-War-Karte mit osmdroid,
-  `FogRenderer`/`FogOverlay`, `MapIcons` (LKW, Mond), `MilestonesUi` (Übersicht, Meldung mit Animation,
-  Übernachtungs-Dialog), `MapViewModel`, `MapConfig` mit User-Agent/Cache), `stats` (Auswertung),
-  `settings`, `editor` (Tag bearbeiten, Schicht-Dialog), `components` (km-Dialog,
-  Berechtigungs-Erklärung, Länderauswahl …), `MainViewModel`, `AppRoot` (Navigation)
+Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Android, gut testbar),
+**`work/`** und **`location/`** sprechen mit Android-Diensten (GPS, Benachrichtigungen, Wecker),
+**`ui/`** zeigt an. In `ui/` je Bildschirm: `…Screen.kt` (Aufbau der Seite), `…ViewModel.kt` / `…State.kt`
+(Zustand und Abläufe), weitere Dateien mit den einzelnen Karten/Bausteinen (nur Aussehen).
+
+**Start:** `FahrtenbuchApp.kt` (erzeugt alle Dienste, Sicherung vor Migration), `MainActivity.kt`
+(Einstieg, „Arbeit beenden“ aus der Benachrichtigung).
+
+**`data/` – Speichern**
+| Datei | Zuständig für |
+|---|---|
+| `AppDatabase.kt` | Room-Datenbank, Version **5**, alle Migrationen (`MIGRATIONS`) |
+| `DayEntity.kt`, `TourEntity.kt`, `WorkShiftEntity.kt` | Tabellen `days`, `tours`, `work_shifts` |
+| `TrackChunkEntity.kt` | Tabelle `track_chunks` (GPS-Strecke, Punkte als BLOB) + `TrackChunkMeta` (ohne Punkte) |
+| `StopLocationEntity.kt`, `MilestoneEntity.kt` | Tabellen `stop_locations` (Standort bei „Arbeit beenden“), `milestones` |
+| `FahrtenbuchDao.kt`, `TrackDao.kt`, `StopDao.kt` | Datenbank-Abfragen (Tage/Touren/Schichten, Strecken, Standorte/Meilensteine) |
+| `Converters.kt` | Datum ↔ Text für Room |
+| `Repository.kt` | gesamte Speicherlogik für Tage, Touren, Arbeitsschichten (Arbeit beginnen/beenden, km-Übernahme, Tour beenden), Export/Import aller Daten |
+| `RepositoryResults.kt` | Ergebnis-Typen `StartResult`, `EndTourResult` |
+| `TrackRepository.kt`, `TrackChunks.kt` | Strecken speichern/laden; Streckenstück aus Punkten bauen |
+| `Settings.kt` | Einstellungen (SharedPreferences) |
+| `BackupModels.kt` | Datenmodelle der Sicherung (`BackupData`, `WorkSettings`, `MapSettings`, `LegacyWork`) |
+| `Backup.kt` | Datensicherung als JSON, Format **5** (liest 1–4) |
+| `BackupFiles.kt` | Sicherungsdatei lesen/schreiben (Speicherort vom Nutzer gewählt) |
+| `PreMigrationBackup.kt` | automatische Sicherung vor jeder Migration (Kopie + JSON unter Download/Fahrtenbuch) |
+| `OldDatabaseReader.kt` | liest alte Datenbanken roh per SQL (für `PreMigrationBackup`) |
+
+**`domain/` – Logik ohne Android**
+| Datei | Zuständig für |
+|---|---|
+| `Classification.kt` | `Classifier`: voller/halber Tag, Firmenregel, Übernachtung im LKW |
+| `WorkSplitter.kt` | Schichten an Mitternacht teilen, km anteilig verteilen |
+| `Stats.kt`, `Period.kt` | Auswertung je Woche/Monat/Jahr |
+| `Countries.kt`, `Format.kt` | Ländernamen/Flaggen, deutsche Formatierung |
+| `Milestones.kt` | Meilensteine berechnen (mit Datum des Erreichens) |
+| `MilestoneInputs.kt` | Eingabe für die Meilensteine aus Tagen und GPS-Strecken |
+| `MilestoneTracker.kt` | neue Meilensteine speichern; erstes Mal und nach Wiederherstellen still |
+| `geo/Geo.kt` | Entfernungen, Web-Mercator |
+| `geo/TrackFilter.kt` | welche GPS-Messung ein Streckenpunkt wird (30–50 m, ungenaue/Ausreißer verwerfen) |
+| `geo/TrackCodec.kt` | kompaktes Speicherformat der Punkte (Delta-Varint) |
+| `geo/Simplify.kt`, `geo/FogGeometry.kt` | Linien vereinfachen; Strecken in Detailstufen und Gruppen für den Nebel |
+| `geo/Overnights.kt` | Übernachtungsplätze bestimmen und im Umkreis 200 m zusammenfassen |
+
+**`export/`:** `YearExport.kt` (Jahresübersicht erzeugen, `ExportFormat`), `PdfExporter.kt`, `CsvExporter.kt`
+(Excel, Semikolon, BOM), `Share.kt` (Teilen-Menü).
+
+**`location/`:** `LocationProvider.kt` (einzelne GPS-Abfrage, lädt die Offline-Daten), `CountryLocator.kt`
+(Land aus `assets/country_borders.bin`, Natural Earth, Skript `tools/build_country_borders.py`),
+`PlaceLocator.kt` (nächster Ort aus `assets/places.bin`, GeoNames, Skript `tools/build_places.py`).
+
+**`work/` – Hintergrund**
+| Datei | Zuständig für |
+|---|---|
+| `WorkController.kt` | zentrale Abläufe Arbeit beginnen/beenden, Tour beenden (Erinnerung, Aufzeichnung, GPS-Land, Standort) |
+| `TrackingService.kt` | Vordergrunddienst der Streckenaufzeichnung (Plattform-GPS, Benachrichtigung) |
+| `TrackRecorder.kt` | Punkte filtern und in Stücken speichern |
+| `Tracking.kt` | Aufzeichnung starten/stoppen, Berechtigungen, Akku-Optimierung |
+| `StopLocator.kt` | Position beim Arbeitsende |
+| `ReminderScheduler.kt`, `ReminderReceiver.kt` | Erinnerung „Arbeit läuft seit 15 Std.“ |
+| `BootReceiver.kt` | nach Neustart/Update Erinnerung und Aufzeichnung wiederherstellen |
+
+**`ui/` – Oberfläche**
+| Datei | Zuständig für |
+|---|---|
+| `AppRoot.kt` | Navigation, untere Leiste (nur Fahrtenbuch: Heute, Verlauf, Auswertung), Meilenstein-Meldung |
+| `MainHeader.kt` | Kopfzeile: Titel, Zahnrad, Kacheln „Fahrtenbuch“/„Karte“ |
+| `MainViewModel.kt` | gemeinsamer Zustand und Aktionen (Arbeitszeit, km-Abfrage, Export, Sicherung, Einstellungen) |
+| `MilestoneState.kt` | Meilensteine und Warteschlange der Meldungen (Teil des `MainViewModel`) |
+| `UiModels.kt` | `ActiveTour`, `KmPrompt` |
+| `theme/Theme.kt` | Farben und Schriften |
+| `components/Common.kt` | `SectionCard`, `StatTile`, `DayTypeBadge` u. a. |
+| `components/KmDialog.kt` | km-Abfrage beim Beenden |
+| `components/StartWorkFlow.kt` | „Arbeit beginnen“ mit Berechtigungs-Erklärung (inkl. „Immer erlauben“) |
+| `components/CountryPicker.kt`, `components/Pickers.kt` | Länderauswahl, Datum-/Uhrzeit-Dialoge |
+| `home/HomeScreen.kt` | Startbildschirm „Heute“ |
+| `home/ActionCards.kt`, `home/WorkCard.kt`, `home/SummaryCards.kt` | Erfassen-/Tour-Karten, Arbeitszeit-Karte, Woche/Jahr |
+| `history/HistoryScreen.kt` | Verlauf |
+| `stats/StatsScreen.kt`, `stats/StatsWidgets.kt`, `stats/Charts.kt` | Auswertung, Zeitraum-Auswahl/Auslandstabelle, Diagramme |
+| `editor/EditorScreen.kt` | Eintrag-Bildschirm (Aufbau, Dialoge) |
+| `editor/EditorSections.kt` | Abschnitte: Abwesenheit, Arbeitszeit, Land, km, fehlende Tage, Übernachtung, Einordnung, Notiz |
+| `editor/EditorWidgets.kt` | kleine Bausteine (Feldkarte, Zeit-Kachel, Umschalter …) |
+| `editor/EditorViewModel.kt`, `editor/EditorState.kt`, `editor/EditorRules.kt` | Zustand und Speichern; Zustands-Klassen; Eingabeprüfung |
+| `editor/ShiftDialog.kt` | Arbeitszeit bearbeiten |
+| `settings/SettingsScreen.kt` | Einstellungen (Fahrer, Sicherung, Regeln, Über), Dialoge |
+| `settings/WorkSettingsCard.kt`, `settings/MapSettingsCard.kt`, `settings/SettingsWidgets.kt` | Karten Arbeitszeit und Karte; Schalter/Berechtigungs-Hinweise |
+| `map/MapScreen.kt` | Kartenansicht (Aufbau, Hinweise, Statistik, Dialoge) |
+| `map/FogMap.kt` | osmdroid-Karte mit Nebel, LKW, Übernachtungs-Symbolen und Knöpfen |
+| `map/MapViewModel.kt` | Strecken laden, `FogGeometry` bauen, Statistik, Übernachtungsplätze |
+| `map/FogRenderer.kt`, `map/FogOverlay.kt` | Nebel zeichnen (unabhängig von osmdroid) bzw. als osmdroid-Ebene |
+| `map/MapIcons.kt` | LKW- und Mond-Symbol |
+| `map/MapWidgets.kt` | Aufzeichnungs-Anzeige, Hinweiskarte, OSM-Namensnennung, Statistik-Kacheln |
+| `map/MilestonesSheet.kt`, `map/MilestoneCelebration.kt`, `map/OvernightDialog.kt` | Meilenstein-Übersicht, Meldung mit Animation, Übernachtungs-Dialog |
+| `map/TrackingPermissions.kt` | Berechtigungs-Stand und -Texte der Aufzeichnung |
+| `map/MapConfig.kt` | osmdroid: User-Agent, Kachel-Zwischenspeicher |
 
 ## Zusammenspiel (über mehrere Dateien)
 
@@ -71,11 +137,12 @@ lokal; Internet nur für die OpenStreetMap-Kartenkacheln. Berechnet keine Steuer
   beginnt mit dem letzten Punkt des vorigen) → `track_chunks`. `MapViewModel` beobachtet nur die Metadaten,
   dekodiert geänderte Stücke neu und baut `FogGeometry`; `FogOverlay`/`FogRenderer` zeichnen den Nebel.
   Übernachtungsplätze = Übernachtungstage + `stop_locations` (sonst letzter GPS-Punkt des Tages).
-- **Meilensteine:** `MainViewModel` berechnet sie laufend aus Tagen und Strecken (`Milestones.evaluate`),
-  `MilestoneTracker` speichert neue in `milestones` und entscheidet, ob eine Meldung erscheint.
+- **Meilensteine:** `MilestoneState` (im `MainViewModel`) berechnet sie laufend aus Tagen und Strecken
+  (`MilestoneInputs` → `Milestones.evaluate`), `MilestoneTracker` speichert neue in `milestones` und
+  entscheidet, ob eine Meldung erscheint.
 - **Datensicherung:** Neue Tabellen/Felder müssen an drei Stellen ergänzt werden: `Backup` (JSON hin und
-  zurück), `Repository.exportData`/`replaceAll` und `PreMigrationBackup.readOldDatabase` (liest alte
-  Datenbanken roh per SQL, Tabellen/Spalten jeweils optional).
+  zurück, Modelle in `BackupModels`), `Repository.exportData`/`replaceAll` und `OldDatabaseReader`
+  (liest alte Datenbanken roh per SQL, Tabellen/Spalten jeweils optional).
 
 ## Wichtige Regeln (unbedingt einhalten)
 
@@ -97,6 +164,8 @@ lokal; Internet nur für die OpenStreetMap-Kartenkacheln. Berechnet keine Steuer
    nennen. Schlägt der Build fehl, zuerst den Fehler beheben, dann mergen.
 5. Vor größeren Änderungen offene Fragen klären; der Nutzer bestätigt den Start oft ausdrücklich.
 6. App-Texte komplett Deutsch. Daten bleiben lokal auf dem Handy.
+7. **Wenn du Dateien hinzufügst, umbenennst oder die Struktur änderst, aktualisiere diese CLAUDE.md am
+   Ende der Aufgabe.**
 
 ## Bauen und testen
 
@@ -138,6 +207,10 @@ Hinweise für die Cloud-Umgebung:
   Kopf der Skripte); die Ergebnisdateien sind eingecheckt.
 
 ## Zuletzt geändert
+
+- **Aufteilung in kleinere Dateien (ohne Funktionsänderung):** Entitäten je Datei, Sicherungs-Modelle,
+  Export und Datei-Ein-/Ausgabe aus dem `MainViewModel` herausgelöst (`YearExport`, `BackupFiles`,
+  `MilestoneState`), Bildschirme in Aufbau + Bausteine geteilt, Eingabeprüfung in `EditorRules`.
 
 - **Umschalter Fahrtenbuch/Karte, LKW-Symbol, Übernachtungsplätze, Meilensteine (DB v5, Backup 5):**
   Einstellungen über Zahnrad, km²-Kachel entfernt (Statistik: km laut GPS, Länder), Ortsnamen offline.

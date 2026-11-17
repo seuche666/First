@@ -1,7 +1,7 @@
 package de.fernfahrer.fahrtenbuch
 
 import de.fernfahrer.fahrtenbuch.ui.editor.EditorState
-import de.fernfahrer.fahrtenbuch.ui.editor.EditorViewModel
+import de.fernfahrer.fahrtenbuch.ui.editor.EditorRules
 import de.fernfahrer.fahrtenbuch.ui.editor.MIDNIGHT
 import de.fernfahrer.fahrtenbuch.ui.editor.ShiftDraft
 import de.fernfahrer.fahrtenbuch.work.ReminderScheduler
@@ -17,28 +17,28 @@ class EditorRulesTest {
     @Test
     fun schichtUeberMitternachtIstGueltig() {
         val d = ShiftDraft(startDate = so, startMinute = 23 * 60 + 30, endDate = so.plusDays(1), endMinute = 600)
-        assertNull(EditorViewModel.validateShift(d))
+        assertNull(EditorRules.validateShift(d))
     }
 
     @Test
     fun endeVorBeginnUndZuKleineKmWerdenAbgelehnt() {
         val d = ShiftDraft(startDate = so, startMinute = 600, endDate = so, endMinute = 540)
-        assertEquals("Das Arbeitsende muss nach dem Arbeitsbeginn liegen.", EditorViewModel.validateShift(d))
+        assertEquals("Das Arbeitsende muss nach dem Arbeitsbeginn liegen.", EditorRules.validateShift(d))
         val km = ShiftDraft(startDate = so, startMinute = 600, endDate = so, endMinute = 700, kmStart = "1000", kmEnd = "900")
-        assertEquals("Der km-Stand am Ende ist kleiner als zu Beginn.", EditorViewModel.validateShift(km))
+        assertEquals("Der km-Stand am Ende ist kleiner als zu Beginn.", EditorRules.validateShift(km))
     }
 
     @Test
     fun endeUmNullUhrGiltAls24UhrDesVortags() {
         val d = ShiftDraft(startDate = so, startMinute = 20 * 60, endDate = so.plusDays(1), endMinute = 0)
-        assertEquals(so to MIDNIGHT, EditorViewModel.normalizeEnd(d))
+        assertEquals(so to MIDNIGHT, EditorRules.normalizeEnd(d))
     }
 
     @Test
     fun tagesZeitenWerdenGeprueft() {
         val base = EditorState(loading = false, startMinute = 0, endMinute = 1440)
-        assertNull(EditorViewModel.validate(base))
-        assertEquals("Das Ende muss nach dem Beginn liegen.", EditorViewModel.validate(base.copy(startMinute = 600, endMinute = 500)))
+        assertNull(EditorRules.validate(base))
+        assertEquals("Das Ende muss nach dem Beginn liegen.", EditorRules.validate(base.copy(startMinute = 600, endMinute = 500)))
     }
 
     @Test

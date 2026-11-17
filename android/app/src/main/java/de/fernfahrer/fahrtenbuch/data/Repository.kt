@@ -7,23 +7,10 @@ import de.fernfahrer.fahrtenbuch.domain.CountingRules
 import de.fernfahrer.fahrtenbuch.domain.KmShare
 import de.fernfahrer.fahrtenbuch.domain.Stats
 import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import java.time.LocalDate
 import java.time.LocalDateTime
-
-/** Ergebnis von [Repository.startWork]. */
-sealed interface StartResult {
-    data class Started(val shift: WorkShiftEntity, val dayCreated: Boolean) : StartResult
-    data class AlreadyRunning(val shift: WorkShiftEntity) : StartResult
-}
-
-/** Ergebnis von [Repository.endTour]. */
-sealed interface EndTourResult {
-    /** Tour beendet; [endedShift] ist die dabei mit beendete Arbeitszeit (falls eine lief). */
-    data class Ended(val endedShift: WorkShiftEntity?, val filledDays: Int) : EndTourResult
-    data object NoActiveTour : EndTourResult
-}
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 class Repository(
     private val db: AppDatabase,

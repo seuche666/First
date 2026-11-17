@@ -10,7 +10,7 @@ import de.fernfahrer.fahrtenbuch.domain.MilestoneTracker
 import de.fernfahrer.fahrtenbuch.domain.Milestones
 import de.fernfahrer.fahrtenbuch.domain.geo.Overnights
 import de.fernfahrer.fahrtenbuch.location.PlaceLocator
-import de.fernfahrer.fahrtenbuch.ui.MainViewModel
+import de.fernfahrer.fahrtenbuch.domain.MilestoneInputs
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -46,7 +46,7 @@ class MilestonesAndOvernightsTest {
             meta(2, start.plusDays(10), 300.0, "AT,DE"),
             meta(3, start.plusDays(12), 200.0, "IT"),
         )
-        val list = Milestones.evaluate(MainViewModel.milestoneInput(classified, meta, ZoneOffset.UTC))
+        val list = Milestones.evaluate(MilestoneInputs.from(classified, meta, ZoneOffset.UTC))
 
         // 1.000 km am Tag, an dem die Summe 1.000 überschreitet (600 + 300 + 200)
         assertEquals(start.plusDays(12), statusOf(list, "km_1000").achievedOn)
@@ -70,7 +70,7 @@ class MilestonesAndOvernightsTest {
     @Test
     fun tourMitVierTagenReichtNichtFuerDenTourMeilenstein() {
         val classified = Classifier.classifyAll(tour(1, start, 4), listOf(TourEntity(1, true)), CountingRules())
-        val st = statusOf(Milestones.evaluate(MainViewModel.milestoneInput(classified, emptyList())), "tour_5")
+        val st = statusOf(Milestones.evaluate(MilestoneInputs.from(classified, emptyList())), "tour_5")
         assertNull(st.achievedOn)
         assertEquals(4L, st.current)
         assertEquals(0.8f, st.progress, 0.001f)
@@ -80,7 +80,7 @@ class MilestonesAndOvernightsTest {
     fun zehnteUebernachtungSchaltetMeilensteinFrei() {
         val days = tour(1, start, 11)
         val classified = Classifier.classifyAll(days, listOf(TourEntity(1, false)), CountingRules())
-        val list = Milestones.evaluate(MainViewModel.milestoneInput(classified, emptyList()))
+        val list = Milestones.evaluate(MilestoneInputs.from(classified, emptyList()))
         assertEquals(start.plusDays(9), statusOf(list, "naechte_10").achievedOn)
     }
 

@@ -15,14 +15,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Rule
 import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Restore
-import androidx.compose.material.icons.automirrored.rounded.Rule
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -33,17 +35,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Slider
-import androidx.compose.material.icons.rounded.Work
-import de.fernfahrer.fahrtenbuch.data.WorkSettings
-import de.fernfahrer.fahrtenbuch.data.MapSettings
-import de.fernfahrer.fahrtenbuch.ui.map.TrackingTexts
-import de.fernfahrer.fahrtenbuch.ui.map.rememberTrackingPermissions
-import androidx.compose.material.icons.rounded.DeleteForever
-import androidx.compose.material.icons.rounded.Map
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -57,7 +48,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.fernfahrer.fahrtenbuch.domain.Format
@@ -277,180 +267,5 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}) {
             confirmButton = { TextButton(onClick = vm::confirmRestore) { Text("Wiederherstellen") } },
             dismissButton = { TextButton(onClick = vm::cancelRestore) { Text("Abbrechen") } },
         )
-    }
-}
-
-@Composable
-private fun RuleRow(title: String, text: String) {
-    Column(Modifier.padding(bottom = 10.dp)) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Text(text, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-/** Erinnerung bei langer Arbeitszeit und GPS-Ländererkennung. */
-@Composable
-private fun WorkSettingsCard(work: WorkSettings, onChange: (WorkSettings) -> Unit) {
-    SectionCard(title = "Arbeitszeit", icon = Icons.Rounded.Work) {
-        SettingSwitch(
-            title = "Erinnerung bei langer Arbeitszeit",
-            text = "Benachrichtigung „Arbeit läuft seit ${work.reminderHours} Std. – vergessen zu beenden?“ " +
-                "mit „Arbeit beenden“ und „Läuft noch“ (erneut nach 3 Std.).",
-            checked = work.reminderEnabled,
-            onChange = { onChange(work.copy(reminderEnabled = it)) },
-        )
-        if (work.reminderEnabled) {
-            Text("Erinnern nach ${work.reminderHours} Stunden", style = MaterialTheme.typography.bodyMedium)
-            Slider(
-                value = work.reminderHours.toFloat(),
-                onValueChange = { onChange(work.copy(reminderHours = it.toInt())) },
-                valueRange = de.fernfahrer.fahrtenbuch.data.Settings.MIN_HOURS.toFloat()..de.fernfahrer.fahrtenbuch.data.Settings.MAX_HOURS.toFloat(),
-                steps = de.fernfahrer.fahrtenbuch.data.Settings.MAX_HOURS - de.fernfahrer.fahrtenbuch.data.Settings.MIN_HOURS - 1,
-            )
-            PermissionStatus(
-                permissions = if (android.os.Build.VERSION.SDK_INT >= 33) listOf(android.Manifest.permission.POST_NOTIFICATIONS) else emptyList(),
-                missingText = "Benachrichtigungen sind für die App nicht erlaubt – die Erinnerung kann nicht erscheinen.",
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        SettingSwitch(
-            title = "Land per GPS erkennen",
-            text = "Bei Arbeitsbeginn und -ende (und beim Öffnen der App nach Mitternacht) wird das Land " +
-                "einmalig per GPS ermittelt und vorgeschlagen – offline, ohne Dauer-GPS. Von Hand gewählte " +
-                "Länder haben immer Vorrang.",
-            checked = work.gpsEnabled,
-            onChange = { onChange(work.copy(gpsEnabled = it)) },
-        )
-        if (work.gpsEnabled) {
-            PermissionStatus(
-                permissions = listOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION),
-                missingText = "Standort ist für die App nicht erlaubt – das Land wird wie bisher von Hand gewählt.",
-                anyGranted = true,
-            )
-        }
-    }
-}
-
-/** Streckenaufzeichnung, Korridorbreite, Berechtigungen und Löschen der Strecken. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MapSettingsCard(
-    map: MapSettings,
-    onChange: (MapSettings) -> Unit,
-    onPermissionsChanged: () -> Unit,
-    onDeleteTracks: () -> Unit,
-) {
-    val permissions = rememberTrackingPermissions(onChanged = onPermissionsChanged)
-    SectionCard(title = "Karte", icon = Icons.Rounded.Map) {
-        SettingSwitch(
-            title = "Strecke während der Arbeitszeit aufzeichnen",
-            text = "Startet automatisch bei „Arbeit beginnen“ und stoppt bei „Arbeit beenden“. Funktioniert " +
-                "offline (nur GPS des Handys). Die Punkte bleiben auf dem Handy und sind in der Datensicherung enthalten.",
-            checked = map.trackingEnabled,
-            onChange = { onChange(map.copy(trackingEnabled = it)) },
-        )
-        if (map.trackingEnabled) {
-            if (!permissions.location) {
-                PermissionHint(TrackingTexts.LOCATION_MISSING, "Erlauben", permissions.requestLocation)
-            } else if (!permissions.background) {
-                PermissionHint(TrackingTexts.BACKGROUND_MISSING, "Immer erlauben", permissions.requestBackground)
-            }
-            if (!permissions.batteryOk) {
-                PermissionHint(TrackingTexts.BATTERY, "Ausnahme erlauben", permissions.openBattery)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text("Breite der freigelegten Strecke", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "Gilt auch für alle bisherigen Strecken. Beim Rauszoomen bleiben die Strecken immer sichtbar.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            MapSettings.CORRIDOR_OPTIONS.forEachIndexed { i, m ->
-                SegmentedButton(
-                    selected = map.corridorMeters == m,
-                    onClick = { onChange(map.copy(corridorMeters = m)) },
-                    shape = SegmentedButtonDefaults.itemShape(i, MapSettings.CORRIDOR_OPTIONS.size),
-                    label = { Text(if (m >= 1000) "${m / 1000} km" else "$m m", maxLines = 1) },
-                )
-            }
-        }
-        Spacer(Modifier.height(14.dp))
-        OutlinedButton(onClick = onDeleteTracks, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            Icon(Icons.Rounded.DeleteForever, null)
-            Spacer(Modifier.width(8.dp))
-            Text("Alle Strecken löschen")
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "Kartendaten © OpenStreetMap-Mitwirkende. Ortsnamen: GeoNames (CC BY 4.0), offline in der App. Die Kartenbilder werden bei Bedarf aus dem Internet " +
-                "geladen und zwischengespeichert; dabei wird nur der angezeigte Kartenausschnitt abgefragt, " +
-                "nie deine Strecken.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun PermissionHint(text: String, action: String, onAction: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-        TextButton(onClick = onAction) { Text(action) }
-    }
-}
-
-@Composable
-private fun SettingSwitch(title: String, text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-/** Zeigt an, ob eine Android-Berechtigung fehlt, mit Button zum Erlauben bzw. zu den App-Einstellungen. */
-@Composable
-private fun PermissionStatus(permissions: List<String>, missingText: String, anyGranted: Boolean = false) {
-    if (permissions.isEmpty()) return
-    val context = LocalContext.current
-    fun granted(): Boolean {
-        val results = permissions.map {
-            androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        }
-        return if (anyGranted) results.any { it } else results.all { it }
-    }
-    var ok by remember { mutableStateOf(granted()) }
-    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
-        ok = granted()
-        onPauseOrDispose { }
-    }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        ok = granted()
-        if (!ok) {
-            // Dauerhaft abgelehnt: zu den App-Einstellungen
-            context.startActivity(
-                android.content.Intent(
-                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    android.net.Uri.fromParts("package", context.packageName, null),
-                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }
-    }
-    if (!ok) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-            Text(
-                missingText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = { launcher.launch(permissions.toTypedArray()) }) { Text("Erlauben") }
-        }
     }
 }

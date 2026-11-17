@@ -8,20 +8,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import de.fernfahrer.fahrtenbuch.FahrtenbuchApp
-import de.fernfahrer.fahrtenbuch.data.Backup
+import de.fernfahrer.fahrtenbuch.data.BackupFiles
+import de.fernfahrer.fahrtenbuch.export.ExportFormat
+import de.fernfahrer.fahrtenbuch.export.YearExport
 import de.fernfahrer.fahrtenbuch.data.BackupData
 import de.fernfahrer.fahrtenbuch.data.BackupFormatException
 import de.fernfahrer.fahrtenbuch.data.EndTourResult
 import de.fernfahrer.fahrtenbuch.data.MapSettings
-import de.fernfahrer.fahrtenbuch.domain.MilestoneTracker
-import de.fernfahrer.fahrtenbuch.data.TrackChunkMeta
-import de.fernfahrer.fahrtenbuch.domain.Countries
-import de.fernfahrer.fahrtenbuch.domain.Milestones
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.flowOn
-import java.time.Instant
-import java.time.ZoneId
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
 import de.fernfahrer.fahrtenbuch.data.StartResult
@@ -30,16 +23,16 @@ import de.fernfahrer.fahrtenbuch.data.WorkShiftEntity
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.CountingRules
 import de.fernfahrer.fahrtenbuch.domain.Format
+import de.fernfahrer.fahrtenbuch.domain.Milestones
 import de.fernfahrer.fahrtenbuch.domain.Period
 import de.fernfahrer.fahrtenbuch.domain.PeriodType
-import de.fernfahrer.fahrtenbuch.domain.Stats
 import de.fernfahrer.fahrtenbuch.domain.WorkPortion
 import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
-import de.fernfahrer.fahrtenbuch.export.CsvExporter
-import de.fernfahrer.fahrtenbuch.export.PdfExporter
 import de.fernfahrer.fahrtenbuch.export.Share
 import de.fernfahrer.fahrtenbuch.work.WorkController
-import kotlinx.coroutines.Dispatchers
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,41 +43,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.temporal.ChronoUnit
-
-/** Informationen zur laufenden Tour für den Startbildschirm. */
-data class ActiveTour(
-    val tourId: Long,
-    val startDate: LocalDate,
-    /** Wievielter Tag der Tour heute ist. */
-    val dayNumber: Int,
-    val lastCountry: String,
-    val todayEntered: Boolean,
-)
-
-enum class ExportFormat { PDF, CSV }
-
-/** Abfrage des km-Stands beim Beenden. */
-data class KmPrompt(
-    val kind: Kind,
-    /** Zeitpunkt des Tippens auf „Arbeit beenden“/„Tour beenden“ – gilt als Ende. */
-    val at: LocalDateTime,
-    /** Vorschlag: letzter bekannter km-Stand. */
-    val suggestion: Int?,
-    /** km-Stand bei Arbeitsbeginn bzw. am Tagesbeginn; der neue Wert darf nicht kleiner sein. */
-    val minimum: Int?,
-    /** Bei „Tour beenden“: läuft noch eine Arbeitszeit, die mit beendet wird? */
-    val endsRunningWork: Boolean = false,
-) {
-    enum class Kind { END_WORK, END_TOUR }
-}
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 class MainViewModel(
@@ -203,50 +165,15 @@ class MainViewModel(
 
     // ---------- Meilensteine ----------
 
-    private val trackMeta = app?.tracks?.meta ?: flowOf(emptyList())
+    private val milestoneState = MilestoneState(viewModelScope, repo, settings, app?.tracks?.meta ?: flowOf(emptyList()))
 
-    /** Aus den Daten berechneter Stand aller Meilensteine. */
-    private val evaluated: StateFlow<List<Milestones.Status>?> =
-        combine(repo.classifiedDays, trackMeta) { days, meta -> Milestones.evaluate(milestoneInput(days, meta), Countries::label) }
-            .flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-    /** Für die Übersicht: gespeicherte Meilensteine bleiben erreicht, auch wenn Daten gelöscht wurden. */
-    val milestones: StateFlow<List<Milestones.Status>> =
-        combine(evaluated.filterNotNull(), repo.milestones) { list, stored ->
-            val dates = stored.associate { it.id to it.achievedOn }
-            list.map { st -> dates[st.id]?.let { st.copy(achievedOn = it) } ?: st }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    private val _celebrations = MutableStateFlow<List<Milestones.Status>>(emptyList())
+    /** Für die Übersicht: alle Meilensteine mit Stand. */
+    val milestones: StateFlow<List<Milestones.Status>> get() = milestoneState.milestones
 
     /** Gerade anzuzeigende Meldung „Meilenstein erreicht“ (eine nach der anderen). */
-    val celebration: StateFlow<Milestones.Status?> = _celebrations.map { it.firstOrNull() }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val celebration: StateFlow<Milestones.Status?> get() = milestoneState.celebration
 
-    fun dismissCelebration() {
-        _celebrations.value = _celebrations.value.drop(1)
-    }
-
-    private val milestoneTracker = MilestoneTracker(
-        stored = repo::getMilestones,
-        store = repo::addMilestones,
-        isInitialized = { settings.milestonesInitialized },
-        setInitialized = { settings.milestonesInitialized = true },
-    )
-
-    init {
-        viewModelScope.launch {
-            evaluated.filterNotNull().debounce(800).collect { list ->
-                try {
-                    val show = milestoneTracker.check(list)
-                    if (show.isNotEmpty()) _celebrations.value = _celebrations.value + show
-                } catch (e: Exception) {
-                    android.util.Log.w("MainViewModel", "Meilensteine nicht geprüft", e)
-                }
-            }
-        }
-    }
+    fun dismissCelebration() = milestoneState.dismissCelebration()
 
     init {
         // Meldungen des WorkControllers (GPS) weiterreichen
@@ -386,27 +313,11 @@ class MainViewModel(
         viewModelScope.launch {
             _busy.value = true
             try {
-                val all = days.value ?: emptyList()
-                val period = Period(PeriodType.YEAR, LocalDate.of(year, 1, 1))
-                val inYear = all.filter { period.contains(it.day.date) }
-                val workMap = WorkSplitter.byDate(repo.getAllShifts(), LocalDateTime.now())
-                val summary = Stats.summarize(inYear, period, workMap)
-                val driver = settings.driverName.value
-                val rules = settings.rules.value
-                val file = withContext(Dispatchers.IO) {
-                    val dir = Share.exportDir(appContext)
-                    dir.listFiles()?.forEach(File::delete)
-                    when (format) {
-                        ExportFormat.PDF -> File(dir, "Fahrtenbuch_$year.pdf").also {
-                            PdfExporter.write(it, year, inYear, summary, driver, rules, workMap)
-                        }
-                        ExportFormat.CSV -> File(dir, "Fahrtenbuch_$year.csv").also {
-                            it.writeText(CsvExporter.build(year, inYear, summary, driver, rules, workMap), Charsets.UTF_8)
-                        }
-                    }
-                }
-                val mime = if (format == ExportFormat.PDF) "application/pdf" else "text/csv"
-                Share.shareFile(appContext, file, mime, "Jahresübersicht $year teilen")
+                val file = YearExport.createFile(
+                    appContext, year, format, days.value ?: emptyList(), repo.getAllShifts(),
+                    settings.driverName.value, settings.rules.value,
+                )
+                Share.shareFile(appContext, file, YearExport.mimeType(format), "Jahresübersicht $year teilen")
             } catch (e: Exception) {
                 showMessage("Export fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
             } finally {
@@ -427,10 +338,7 @@ class MainViewModel(
                     workSettings = settings.work.value,
                     mapSettings = settings.map.value,
                 )
-                withContext(Dispatchers.IO) {
-                    resolver.openOutputStream(uri, "wt")?.use { it.write(Backup.toJson(data).toByteArray()) }
-                        ?: error("Datei konnte nicht geöffnet werden")
-                }
+                BackupFiles.write(resolver, uri, data)
                 showMessage("Datensicherung gespeichert (${data.days.size} Tage)")
             } catch (e: Exception) {
                 showMessage("Sicherung fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
@@ -446,11 +354,7 @@ class MainViewModel(
         val resolver = context.applicationContext.contentResolver
         viewModelScope.launch {
             try {
-                val text = withContext(Dispatchers.IO) {
-                    resolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
-                        ?: error("Datei konnte nicht geöffnet werden")
-                }
-                _pendingRestore.value = Backup.fromJson(text)
+                _pendingRestore.value = BackupFiles.read(resolver, uri)
             } catch (e: BackupFormatException) {
                 showMessage(e.message ?: "Ungültige Datei")
             } catch (e: Exception) {
@@ -464,7 +368,7 @@ class MainViewModel(
         _pendingRestore.value = null
         viewModelScope.launch {
             try {
-                milestoneTracker.silenceNext()
+                milestoneState.silenceNext()
                 repo.replaceAll(data)
                 if (data.driverName.isNotBlank()) settings.setDriverName(data.driverName)
                 data.rules?.let { settings.setShortSingleDayAsHalf(it.shortSingleDayAsHalf) }
@@ -484,26 +388,6 @@ class MainViewModel(
     }
 
     companion object {
-        /** Eingabe für die Meilensteine aus Tagen und GPS-Strecken. */
-        fun milestoneInput(days: List<ClassifiedDay>, meta: List<TrackChunkMeta>, zone: ZoneId = ZoneId.systemDefault()): Milestones.Input {
-            fun dateOf(sec: Long) = Instant.ofEpochSecond(sec).atZone(zone).toLocalDate()
-            val countries = HashMap<String, LocalDate>()
-            fun seen(code: String, d: LocalDate) {
-                if (code.isBlank()) return
-                val prev = countries[code]
-                if (prev == null || d < prev) countries[code] = d
-            }
-            meta.forEach { m -> m.countries.split(',').forEach { seen(it, dateOf(m.startTime)) } }
-            days.forEach { seen(it.day.countryCode, it.day.date) }
-            return Milestones.Input(
-                gpsDistances = meta.map { dateOf(it.startTime) to it.lengthMeters },
-                countriesFirstSeen = countries,
-                overnightDates = days.filter { it.overnight }.map { it.day.date },
-                tours = days.filter { it.day.tourId != null }.groupBy { it.day.tourId }.values
-                    .map { list -> list.minOf { it.day.date } to list.maxOf { it.day.date } },
-            )
-        }
-
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as FahrtenbuchApp

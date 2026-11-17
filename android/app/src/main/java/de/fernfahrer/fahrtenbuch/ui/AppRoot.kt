@@ -28,7 +28,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import de.fernfahrer.fahrtenbuch.ui.components.KmDialog
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -69,6 +72,20 @@ fun AppRoot() {
 
     LaunchedEffect(Unit) {
         vm.messages.collect { snackbar.showSnackbar(it) }
+    }
+    // Beim Öffnen der App: neue Tage einer laufenden Arbeitszeit anlegen (Teilung an Mitternacht)
+    LifecycleStartEffect(Unit) {
+        vm.onForeground()
+        onStopOrDispose { }
+    }
+    val kmPrompt by vm.kmPrompt.collectAsStateWithLifecycle()
+    kmPrompt?.let { prompt ->
+        KmDialog(
+            prompt = prompt,
+            onSave = { vm.confirmKm(it) },
+            onLater = { vm.confirmKm(null) },
+            onDismiss = vm::dismissKmPrompt,
+        )
     }
 
     Scaffold(
@@ -129,6 +146,7 @@ fun AppRoot() {
                 popExitTransition = { slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(220)) },
             ) {
                 EditorScreen(
+                    mainVm = vm,
                     onDone = { message ->
                         message?.let(vm::showMessage)
                         nav.popBackStack()

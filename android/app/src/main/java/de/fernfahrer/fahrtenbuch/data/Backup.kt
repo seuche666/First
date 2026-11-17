@@ -6,27 +6,56 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
 
+/** Einstellungen rund um die Arbeitszeit (ab Sicherungsformat 3). */
+data class WorkSettings(
+    val reminderEnabled: Boolean = true,
+    val reminderHours: Int = 15,
+    val gpsEnabled: Boolean = true,
+)
+
 data class BackupData(
     val tours: List<TourEntity>,
     val days: List<DayEntity>,
     val driverName: String = "",
     /** Zählregeln aus der Sicherung; null bei alten Sicherungen (Version 1) ohne diese Angabe. */
     val rules: CountingRules? = null,
+    /** Arbeitsschichten (ab Format 3; bei älteren Sicherungen aus der Arbeitszeit pro Tag erzeugt). */
+    val shifts: List<WorkShiftEntity> = emptyList(),
+    /** Einstellungen zur Arbeitszeit; null bei älteren Sicherungen. */
+    val workSettings: WorkSettings? = null,
 )
 
 class BackupFormatException(message: String) : Exception(message)
+
+/** Übernahme der Arbeitszeit pro Tag aus App-Version 1.0.6 in Schichten (wie Datenbank-Migration 2 → 3). */
+object LegacyWork {
+    fun toShifts(days: List<DayEntity>): List<WorkShiftEntity> =
+        days.filter { it.legacyWorkStartMinute != null || it.legacyWorkEndMinute != null }
+            .sortedBy { it.date }
+            .map { d ->
+                WorkShiftEntity(
+                    startDate = d.date,
+                    startMinute = d.legacyWorkStartMinute,
+                    endDate = if (d.legacyWorkEndMinute != null) d.date else null,
+                    endMinute = d.legacyWorkEndMinute,
+                    running = false,
+                )
+            }
+}
 
 /**
  * Wandelt alle Daten in eine JSON-Datei um und zurück (für Handywechsel).
  *
  * Versionen:
  * - 1: Tage, Touren, Fahrername
- * - 2: zusätzlich Arbeitsbeginn/-ende pro Tag und die Zählregel (Firmenregel). Sicherungen der
- *      Version 1 werden weiterhin gelesen; fehlende Felder bleiben leer.
+ * - 2: zusätzlich Arbeitsbeginn/-ende pro Tag und die Zählregel (Firmenregel)
+ * - 3: Arbeitsschichten (über Mitternacht), Land von Hand gewählt, Übernachtung im LKW,
+ *      geschätzte km, Einstellungen zur Arbeitszeit
+ * Ältere Sicherungen werden weiterhin gelesen; fehlende Felder erhalten sinnvolle Werte.
  */
 object Backup {
     private const val APP_ID = "fahrtenbuch-android"
-    const val VERSION = 2
+    const val VERSION = 3
 
     fun toJson(data: BackupData): String {
         val root = JSONObject()
@@ -35,6 +64,15 @@ object Backup {
         root.put("exportedAt", java.time.LocalDateTime.now().withNano(0).toString())
         root.put("driverName", data.driverName)
         data.rules?.let { root.put("rules", JSONObject().put("shortSingleDayAsHalf", it.shortSingleDayAsHalf)) }
+        data.workSettings?.let {
+            root.put(
+                "workSettings",
+                JSONObject()
+                    .put("reminderEnabled", it.reminderEnabled)
+                    .put("reminderHours", it.reminderHours)
+                    .put("gpsEnabled", it.gpsEnabled),
+            )
+        }
         root.put("tours", JSONArray().apply {
             data.tours.forEach { put(JSONObject().put("id", it.id).put("ended", it.ended)) }
         })
@@ -47,13 +85,33 @@ object Backup {
                         .put("startMinute", d.startMinute)
                         .put("endMinute", d.endMinute)
                         .put("countryCode", d.countryCode)
-                        .put("kmStart", d.kmStart ?: JSONObject.NULL)
-                        .put("kmEnd", d.kmEnd ?: JSONObject.NULL)
+                        .put("kmStart", d.kmStart.orNull())
+                        .put("kmEnd", d.kmEnd.orNull())
                         .put("note", d.note)
-                        .put("tourId", d.tourId ?: JSONObject.NULL)
-                        .put("dayTypeOverride", d.dayTypeOverride?.name ?: JSONObject.NULL)
-                        .put("workStartMinute", d.workStartMinute ?: JSONObject.NULL)
-                        .put("workEndMinute", d.workEndMinute ?: JSONObject.NULL),
+                        .put("tourId", d.tourId.orNull())
+                        .put("dayTypeOverride", d.dayTypeOverride?.name.orNull())
+                        // Feldnamen wie in Format 2 (alte Arbeitszeit pro Tag, unverändert aufbewahrt)
+                        .put("workStartMinute", d.legacyWorkStartMinute.orNull())
+                        .put("workEndMinute", d.legacyWorkEndMinute.orNull())
+                        .put("countryManual", d.countryManual)
+                        .put("overnightOverride", d.overnightOverride.orNull())
+                        .put("kmInterpolated", d.kmInterpolated)
+                        .put("timesAuto", d.timesAuto),
+                )
+            }
+        })
+        root.put("shifts", JSONArray().apply {
+            data.shifts.forEach { s ->
+                put(
+                    JSONObject()
+                        .put("id", s.id)
+                        .put("startDate", s.startDate.toString())
+                        .put("startMinute", s.startMinute.orNull())
+                        .put("endDate", s.endDate?.toString().orNull())
+                        .put("endMinute", s.endMinute.orNull())
+                        .put("running", s.running)
+                        .put("kmStart", s.kmStart.orNull())
+                        .put("kmEnd", s.kmEnd.orNull()),
                 )
             }
         })
@@ -69,7 +127,8 @@ object Backup {
         if (root.optString("app") != APP_ID) {
             throw BackupFormatException("Die Datei ist keine Datensicherung dieser App.")
         }
-        if (root.optInt("version") > VERSION) {
+        val version = root.optInt("version")
+        if (version > VERSION) {
             throw BackupFormatException("Die Sicherung stammt aus einer neueren App-Version. Bitte die App aktualisieren.")
         }
         try {
@@ -95,18 +154,51 @@ object Backup {
                     tourId = tourId,
                     dayTypeOverride = d.optStringOrNull("dayTypeOverride")
                         ?.let { v -> DayType.entries.firstOrNull { it.name == v } },
-                    // Ab Version 2; in alten Sicherungen nicht vorhanden → leer.
-                    workStartMinute = d.optIntOrNull("workStartMinute")?.coerceIn(0, 1439),
-                    workEndMinute = d.optIntOrNull("workEndMinute")?.coerceIn(1, 1440),
+                    // Format 2: Arbeitszeit pro Tag; in älteren Sicherungen nicht vorhanden → leer.
+                    legacyWorkStartMinute = d.optIntOrNull("workStartMinute")?.coerceIn(0, 1439),
+                    legacyWorkEndMinute = d.optIntOrNull("workEndMinute")?.coerceIn(1, 1440),
+                    // Ab Format 3; ältere Einträge gelten als von Hand erfasst (GPS ändert sie nie).
+                    countryManual = if (d.has("countryManual")) d.getBoolean("countryManual") else true,
+                    overnightOverride = d.optBooleanOrNull("overnightOverride"),
+                    kmInterpolated = d.optBoolean("kmInterpolated", false),
+                    timesAuto = d.optBoolean("timesAuto", false),
                 )
             }
             if (days.map { it.date }.toSet().size != days.size) {
                 throw BackupFormatException("Die Sicherung enthält einen Tag doppelt.")
             }
+            val shiftsJson = root.optJSONArray("shifts")
+            val shifts = if (shiftsJson == null) {
+                LegacyWork.toShifts(days)
+            } else {
+                (0 until shiftsJson.length()).map { i ->
+                    val s = shiftsJson.getJSONObject(i)
+                    WorkShiftEntity(
+                        id = s.getLong("id"),
+                        startDate = LocalDate.parse(s.getString("startDate")),
+                        startMinute = s.optIntOrNull("startMinute")?.coerceIn(0, 1439),
+                        endDate = s.optStringOrNull("endDate")?.let(LocalDate::parse),
+                        endMinute = s.optIntOrNull("endMinute")?.coerceIn(0, 1440),
+                        running = s.optBoolean("running", false),
+                        kmStart = s.optIntOrNull("kmStart"),
+                        kmEnd = s.optIntOrNull("kmEnd"),
+                    )
+                }
+            }
+            if (shifts.count { it.running } > 1) {
+                throw BackupFormatException("Die Sicherung enthält mehrere laufende Arbeitszeiten.")
+            }
             val rules = root.optJSONObject("rules")?.let {
                 CountingRules(shortSingleDayAsHalf = it.optBoolean("shortSingleDayAsHalf", false))
             }
-            return BackupData(tours, days, root.optString("driverName", ""), rules)
+            val workSettings = root.optJSONObject("workSettings")?.let {
+                WorkSettings(
+                    reminderEnabled = it.optBoolean("reminderEnabled", true),
+                    reminderHours = it.optInt("reminderHours", 15).coerceIn(1, 24),
+                    gpsEnabled = it.optBoolean("gpsEnabled", true),
+                )
+            }
+            return BackupData(tours, days, root.optString("driverName", ""), rules, shifts, workSettings)
         } catch (e: BackupFormatException) {
             throw e
         } catch (e: Exception) {
@@ -114,7 +206,10 @@ object Backup {
         }
     }
 
+    private fun Any?.orNull(): Any = this ?: JSONObject.NULL
+
     private fun JSONObject.optLongOrNull(key: String): Long? = if (!has(key) || isNull(key)) null else getLong(key)
     private fun JSONObject.optIntOrNull(key: String): Int? = if (!has(key) || isNull(key)) null else getInt(key)
     private fun JSONObject.optStringOrNull(key: String): String? = if (!has(key) || isNull(key)) null else getString(key)
+    private fun JSONObject.optBooleanOrNull(key: String): Boolean? = if (!has(key) || isNull(key)) null else getBoolean(key)
 }

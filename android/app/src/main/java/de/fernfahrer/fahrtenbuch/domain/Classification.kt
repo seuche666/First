@@ -45,7 +45,12 @@ data class ClassifiedDay(
     val reason: String,
     /** Automatische Einordnung beruht auf der Firmenregel (eintägig, 8 Std. oder weniger). */
     val companyRule: Boolean = false,
+    /** Automatischer Vorschlag „Übernachtung im LKW“ (jede Nacht einer mehrtägigen Tour). */
+    val overnightAuto: Boolean = false,
 ) {
+    /** Übernachtung im LKW in der Nacht nach diesem Tag (von Hand geändert oder automatisch). */
+    val overnight: Boolean get() = day.overnightOverride ?: overnightAuto
+
     /** Verwendete Einordnung: manuelle Änderung oder automatisch. */
     val type: DayType get() = day.dayTypeOverride ?: autoType
     val isManual: Boolean get() = day.dayTypeOverride != null && day.dayTypeOverride != autoType
@@ -100,6 +105,16 @@ object Classifier {
         else -> AutoClassification(DayType.NONE, "Eintägige Fahrt bis 8 Stunden")
     }
 
+    /**
+     * Automatischer Vorschlag für „Übernachtung im LKW“: jeder Tag einer mehrtägigen Tour außer
+     * dem Rückreisetag (bei laufender Tour also auch der heutige Tag).
+     */
+    fun overnightAuto(day: DayEntity, tourDays: List<DayEntity>?, tourEnded: Boolean): Boolean {
+        if (day.tourId == null || tourDays.isNullOrEmpty()) return false
+        if (!tourEnded) return true
+        return day.date != tourDays.maxOf { it.date }
+    }
+
     /** Ordnet alle Tage ein. */
     fun classifyAll(
         days: List<DayEntity>,
@@ -110,12 +125,14 @@ object Classifier {
         val daysByTour = days.filter { it.tourId != null }.groupBy { it.tourId!! }
         return days.map { day ->
             val tourId = day.tourId
+            val tourDays = tourId?.let { daysByTour[it] }
+            val ended = tourId?.let { endedById[it] ?: true } ?: false
             val auto = if (tourId == null) {
                 autoType(day, null, false, rules)
             } else {
-                autoType(day, daysByTour[tourId], endedById[tourId] ?: true, rules)
+                autoType(day, tourDays, ended, rules)
             }
-            ClassifiedDay(day, auto.type, auto.reason, auto.companyRule)
+            ClassifiedDay(day, auto.type, auto.reason, auto.companyRule, overnightAuto(day, tourDays, ended))
         }
     }
 }

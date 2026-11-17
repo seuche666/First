@@ -73,7 +73,8 @@ fun StatsScreen(vm: MainViewModel) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val all = days ?: emptyList()
-    val summary = remember(all, period) { Stats.summarize(all, period) }
+    val workByDate by vm.workByDate.collectAsStateWithLifecycle()
+    val summary = remember(all, period, workByDate) { Stats.summarize(all, period, workByDate) }
     val kmBars = remember(all, period) { Stats.kmBars(all, period) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val exportYear = if (period.type == PeriodType.ALL) LocalDate.now().year else period.anchor.year
@@ -110,6 +111,11 @@ fun StatsScreen(vm: MainViewModel) {
                             StatTile(sum.half.toString(), "halbe Tage", Modifier.weight(1f))
                             StatTile(Format.number(sum.km), "km gefahren", Modifier.weight(1f))
                         }
+                        Spacer(Modifier.height(8.dp))
+                        StatRow {
+                            StatTile(sum.overnights.toString(), "Übernachtungen im LKW", Modifier.weight(1f))
+                            StatTile(Format.duration(sum.workMinutes).removeSuffix(" Std."), "Std. Arbeitszeit", Modifier.weight(1f))
+                        }
                         if (sum.companyRuleDays > 0) {
                             Spacer(Modifier.height(10.dp))
                             Text(
@@ -117,14 +123,6 @@ fun StatsScreen(vm: MainViewModel) {
                                     "(eintägig, 8 Std. oder weniger – das Finanzamt verlangt mehr als 8 Std.)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.tertiary,
-                            )
-                        }
-                        if (sum.workMinutes > 0) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                "Erfasste Arbeitszeit: ${Format.duration(sum.workMinutes)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         if (sum.notCounted > 0) {

@@ -32,6 +32,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
+import androidx.compose.material.icons.rounded.Work
+import de.fernfahrer.fahrtenbuch.data.WorkSettings
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -60,6 +63,7 @@ fun SettingsScreen(vm: MainViewModel) {
     val savedName by vm.driverName.collectAsStateWithLifecycle()
     val pending by vm.pendingRestore.collectAsStateWithLifecycle()
     val rules by vm.rules.collectAsStateWithLifecycle()
+    val work by vm.workSettings.collectAsStateWithLifecycle()
     var name by remember(savedName) { mutableStateOf(savedName) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -131,6 +135,10 @@ fun SettingsScreen(vm: MainViewModel) {
                         Text("Sicherung wiederherstellen")
                     }
                 }
+            }
+
+            item {
+                WorkSettingsCard(work = work, onChange = vm::setWorkSettings)
             }
 
             item {
@@ -221,5 +229,101 @@ private fun RuleRow(title: String, text: String) {
     Column(Modifier.padding(bottom = 10.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Erinnerung bei langer Arbeitszeit und GPS-Ländererkennung. */
+@Composable
+private fun WorkSettingsCard(work: WorkSettings, onChange: (WorkSettings) -> Unit) {
+    SectionCard(title = "Arbeitszeit", icon = Icons.Rounded.Work) {
+        SettingSwitch(
+            title = "Erinnerung bei langer Arbeitszeit",
+            text = "Benachrichtigung „Arbeit läuft seit ${work.reminderHours} Std. – vergessen zu beenden?“ " +
+                "mit „Arbeit beenden“ und „Läuft noch“ (erneut nach 3 Std.).",
+            checked = work.reminderEnabled,
+            onChange = { onChange(work.copy(reminderEnabled = it)) },
+        )
+        if (work.reminderEnabled) {
+            Text("Erinnern nach ${work.reminderHours} Stunden", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = work.reminderHours.toFloat(),
+                onValueChange = { onChange(work.copy(reminderHours = it.toInt())) },
+                valueRange = de.fernfahrer.fahrtenbuch.data.Settings.MIN_HOURS.toFloat()..de.fernfahrer.fahrtenbuch.data.Settings.MAX_HOURS.toFloat(),
+                steps = de.fernfahrer.fahrtenbuch.data.Settings.MAX_HOURS - de.fernfahrer.fahrtenbuch.data.Settings.MIN_HOURS - 1,
+            )
+            PermissionStatus(
+                permissions = if (android.os.Build.VERSION.SDK_INT >= 33) listOf(android.Manifest.permission.POST_NOTIFICATIONS) else emptyList(),
+                missingText = "Benachrichtigungen sind für die App nicht erlaubt – die Erinnerung kann nicht erscheinen.",
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        SettingSwitch(
+            title = "Land per GPS erkennen",
+            text = "Bei Arbeitsbeginn und -ende (und beim Öffnen der App nach Mitternacht) wird das Land " +
+                "einmalig per GPS ermittelt und vorgeschlagen – offline, ohne Dauer-GPS. Von Hand gewählte " +
+                "Länder haben immer Vorrang.",
+            checked = work.gpsEnabled,
+            onChange = { onChange(work.copy(gpsEnabled = it)) },
+        )
+        if (work.gpsEnabled) {
+            PermissionStatus(
+                permissions = listOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION),
+                missingText = "Standort ist für die App nicht erlaubt – das Land wird wie bisher von Hand gewählt.",
+                anyGranted = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** Zeigt an, ob eine Android-Berechtigung fehlt, mit Button zum Erlauben bzw. zu den App-Einstellungen. */
+@Composable
+private fun PermissionStatus(permissions: List<String>, missingText: String, anyGranted: Boolean = false) {
+    if (permissions.isEmpty()) return
+    val context = LocalContext.current
+    fun granted(): Boolean {
+        val results = permissions.map {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        return if (anyGranted) results.any { it } else results.all { it }
+    }
+    var ok by remember { mutableStateOf(granted()) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        ok = granted()
+        onPauseOrDispose { }
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        ok = granted()
+        if (!ok) {
+            // Dauerhaft abgelehnt: zu den App-Einstellungen
+            context.startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", context.packageName, null),
+                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+    if (!ok) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+            Text(
+                missingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { launcher.launch(permissions.toTypedArray()) }) { Text("Erlauben") }
+        }
     }
 }

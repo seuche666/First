@@ -11,19 +11,26 @@ import de.fernfahrer.fahrtenbuch.FahrtenbuchApp
 import de.fernfahrer.fahrtenbuch.data.Backup
 import de.fernfahrer.fahrtenbuch.data.BackupData
 import de.fernfahrer.fahrtenbuch.data.BackupFormatException
+import de.fernfahrer.fahrtenbuch.data.EndTourResult
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
-import de.fernfahrer.fahrtenbuch.data.StampResult
+import de.fernfahrer.fahrtenbuch.data.StartResult
+import de.fernfahrer.fahrtenbuch.data.WorkSettings
+import de.fernfahrer.fahrtenbuch.data.WorkShiftEntity
+import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.CountingRules
 import de.fernfahrer.fahrtenbuch.domain.Format
-import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.Period
 import de.fernfahrer.fahrtenbuch.domain.PeriodType
 import de.fernfahrer.fahrtenbuch.domain.Stats
+import de.fernfahrer.fahrtenbuch.domain.WorkPortion
+import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
 import de.fernfahrer.fahrtenbuch.export.CsvExporter
 import de.fernfahrer.fahrtenbuch.export.PdfExporter
 import de.fernfahrer.fahrtenbuch.export.Share
+import de.fernfahrer.fahrtenbuch.work.WorkController
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -31,12 +38,15 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 
 /** Informationen zur laufenden Tour für den Startbildschirm. */
@@ -47,36 +57,71 @@ data class ActiveTour(
     val dayNumber: Int,
     val lastCountry: String,
     val todayEntered: Boolean,
-    /** Heute erfasster Arbeitsbeginn/-ende (für die Firma), falls vorhanden. */
-    val todayWorkStart: Int? = null,
-    val todayWorkEnd: Int? = null,
 )
 
 enum class ExportFormat { PDF, CSV }
 
+/** Abfrage des km-Stands beim Beenden. */
+data class KmPrompt(
+    val kind: Kind,
+    /** Zeitpunkt des Tippens auf „Arbeit beenden“/„Tour beenden“ – gilt als Ende. */
+    val at: LocalDateTime,
+    /** Vorschlag: letzter bekannter km-Stand. */
+    val suggestion: Int?,
+    /** km-Stand bei Arbeitsbeginn bzw. am Tagesbeginn; der neue Wert darf nicht kleiner sein. */
+    val minimum: Int?,
+    /** Bei „Tour beenden“: läuft noch eine Arbeitszeit, die mit beendet wird? */
+    val endsRunningWork: Boolean = false,
+) {
+    enum class Kind { END_WORK, END_TOUR }
+}
+
 class MainViewModel(
     private val repo: Repository,
     private val settings: Settings,
+    private val work: WorkController,
+    private val app: FahrtenbuchApp?,
 ) : ViewModel() {
 
     /** Alle Tage, neueste zuerst; null solange noch geladen wird. */
     val days: StateFlow<List<ClassifiedDay>?> =
         repo.classifiedDays.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** Minütlicher Takt, damit eine laufende Arbeitszeit aktuell angezeigt wird. */
+    private val minuteTicker = flow {
+        while (true) {
+            emit(LocalDateTime.now())
+            delay(30_000)
+        }
+    }
+
+    /** Arbeitsschichten (roh). */
+    val shifts: StateFlow<List<WorkShiftEntity>> =
+        repo.shifts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Laufende Arbeitszeit oder null. */
+    val runningShift: StateFlow<WorkShiftEntity?> = repo.shifts.map { list -> list.firstOrNull { it.running } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Arbeitszeit je Kalendertag (Schichten an Mitternacht geteilt). */
+    val workByDate: StateFlow<Map<LocalDate, List<WorkPortion>>> =
+        combine(repo.shifts, minuteTicker) { list, now -> WorkSplitter.byDate(list, now) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    val now: StateFlow<LocalDateTime> =
+        minuteTicker.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalDateTime.now())
+
     val activeTour: StateFlow<ActiveTour?> = combine(repo.classifiedDays, repo.tours) { days, tours ->
         val tour = tours.filter { !it.ended }.maxByOrNull { it.id } ?: return@combine null
         val tourDays = days.filter { it.day.tourId == tour.id }.map { it.day }
         val start = tourDays.minOfOrNull { it.date } ?: return@combine null
         val today = LocalDate.now()
-        val todayDay = days.firstOrNull { it.day.date == today }?.day
         ActiveTour(
             tourId = tour.id,
             startDate = start,
             dayNumber = ChronoUnit.DAYS.between(start, today).toInt() + 1,
             lastCountry = tourDays.maxBy { it.date }.countryCode,
             todayEntered = tourDays.any { it.date == today },
-            todayWorkStart = todayDay?.workStartMinute,
-            todayWorkEnd = todayDay?.workEndMinute,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -84,25 +129,70 @@ class MainViewModel(
         repo.recentCountries().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val driverName: StateFlow<String> = settings.driverName
-
     fun setDriverName(name: String) = settings.setDriverName(name)
 
     val rules: StateFlow<CountingRules> = settings.rules
-
     fun setShortSingleDayAsHalf(enabled: Boolean) = settings.setShortSingleDayAsHalf(enabled)
 
-    /** Trägt die aktuelle Uhrzeit als Arbeitsbeginn ([isStart]) oder Arbeitsende für heute ein. */
-    fun stampWorkTime(isStart: Boolean) {
+    val workSettings: StateFlow<WorkSettings> = settings.work
+    fun setWorkSettings(value: WorkSettings) {
+        settings.setWorkSettings(value)
+        viewModelScope.launch { work.onReminderSettingsChanged() }
+    }
+
+    /** Muss vor dem ersten „Arbeit beginnen“ die Erklärung zu den Berechtigungen gezeigt werden? */
+    val permissionsExplained: Boolean get() = settings.permissionsExplained
+    fun markPermissionsExplained() {
+        settings.permissionsExplained = true
+    }
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: SharedFlow<String> = _messages
+
+    fun showMessage(text: String) {
+        _messages.tryEmit(text)
+    }
+
+    init {
+        // Meldungen des WorkControllers (GPS) weiterreichen
+        viewModelScope.launch { work.messages.collect { showMessage(it) } }
+        // „Arbeit beenden“ aus der Benachrichtigung
+        app?.let { a ->
+            viewModelScope.launch {
+                a.endWorkRequests.filterNotNull().collect { at ->
+                    a.endWorkRequests.value = null
+                    requestEndWork(at)
+                }
+            }
+        }
+    }
+
+    /** Beim Öffnen der App: neue Tage einer laufenden Schicht anlegen, Hinweise anzeigen. */
+    fun onForeground() {
         viewModelScope.launch {
             try {
-                val minute = Format.nowMinutes(roundTo = 1).let { if (!isStart && it == 0) 24 * 60 else it }
-                when (val r = repo.stampWorkTime(LocalDate.now(), minute, isStart)) {
-                    is StampResult.Saved -> {
-                        val what = if (isStart) "Arbeitsbeginn" else "Arbeitsende"
-                        val extra = if (r.filledDays > 0) " (${Format.days(r.filledDays)} der Tour ergänzt)" else ""
-                        showMessage("$what ${Format.time(r.minute)} gespeichert$extra")
-                    }
-                    StampResult.NoActiveTour -> showMessage("Es läuft keine Tour.")
+                work.onForeground()
+            } catch (e: Exception) {
+                showMessage("Fehler beim Aktualisieren: ${e.localizedMessage ?: e.javaClass.simpleName}")
+            }
+            settings.pendingBackupNotice?.let {
+                settings.pendingBackupNotice = null
+                showMessage(it)
+            }
+        }
+    }
+
+    // ---------- Arbeitszeit ----------
+
+    fun startWork(at: LocalDateTime = work.now()) {
+        viewModelScope.launch {
+            try {
+                when (val r = work.startWork(at)) {
+                    is StartResult.Started -> showMessage(
+                        "Arbeit begonnen um ${Format.time(r.shift.startMinute ?: 0)}" +
+                            (r.shift.kmStart?.let { " · Start-km ${Format.number(it)}" } ?: ""),
+                    )
+                    is StartResult.AlreadyRunning -> showMessage("Die Arbeit läuft bereits.")
                 }
             } catch (e: Exception) {
                 showMessage("Speichern fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
@@ -110,23 +200,85 @@ class MainViewModel(
         }
     }
 
+    private val _kmPrompt = MutableStateFlow<KmPrompt?>(null)
+    val kmPrompt: StateFlow<KmPrompt?> = _kmPrompt.asStateFlow()
+
+    /** „Arbeit beenden“ gedrückt: sofort nach dem km-Stand fragen. */
+    fun requestEndWork(at: LocalDateTime = work.now()) {
+        viewModelScope.launch {
+            val shift = repo.getRunningShift()
+            if (shift == null) {
+                showMessage("Es läuft keine Arbeitszeit.")
+                return@launch
+            }
+            _kmPrompt.value = KmPrompt(
+                kind = KmPrompt.Kind.END_WORK,
+                at = at,
+                suggestion = repo.lastKnownKm(),
+                minimum = shift.kmStart ?: repo.getDayByDate(shift.startDate)?.kmStart,
+            )
+        }
+    }
+
+    /** „Tour beenden“ gedrückt: sofort nach dem km-Stand fragen (nur einmal, auch bei laufender Arbeit). */
+    fun requestEndTour(at: LocalDateTime = work.now()) {
+        viewModelScope.launch {
+            val shift = repo.getRunningShift()
+            val today = repo.getDayByDate(at.toLocalDate())
+            _kmPrompt.value = KmPrompt(
+                kind = KmPrompt.Kind.END_TOUR,
+                at = at,
+                suggestion = repo.lastKnownKm(),
+                minimum = shift?.kmStart ?: today?.kmStart ?: repo.getDayBefore(at.toLocalDate())?.kmEnd,
+                endsRunningWork = shift != null,
+            )
+        }
+    }
+
+    /** km-Abfrage beantwortet: [km] = null bei „Später“. Beendet in beiden Fällen. */
+    fun confirmKm(km: Int?) {
+        val prompt = _kmPrompt.value ?: return
+        _kmPrompt.value = null
+        viewModelScope.launch {
+            try {
+                when (prompt.kind) {
+                    KmPrompt.Kind.END_WORK -> {
+                        val ended = work.endWork(prompt.at, km)
+                        if (ended == null) {
+                            showMessage("Es läuft keine Arbeitszeit.")
+                        } else {
+                            val minutes = WorkSplitter.minutes(WorkSplitter.split(ended, prompt.at))
+                            showMessage(
+                                "Arbeit beendet um ${Format.time(prompt.at.hour * 60 + prompt.at.minute)} · " +
+                                    Format.duration(minutes) +
+                                    (km?.let { " · km ${Format.number(it)}" } ?: " · km später nachtragen"),
+                            )
+                        }
+                    }
+                    KmPrompt.Kind.END_TOUR -> when (val r = work.endTour(prompt.at, km)) {
+                        EndTourResult.NoActiveTour -> showMessage("Es läuft keine Tour.")
+                        is EndTourResult.Ended -> showMessage(
+                            "Tour beendet – willkommen zu Hause!" +
+                                (if (r.endedShift != null) " Arbeitszeit ebenfalls beendet." else ""),
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                showMessage("Speichern fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /** Dialog ohne Auswahl geschlossen (z. B. Zurück-Taste): nichts beenden. */
+    fun dismissKmPrompt() {
+        _kmPrompt.value = null
+    }
+
     /** Zeitraum der Auswertung (bleibt beim Wechsel der Tabs erhalten). */
     private val _period = MutableStateFlow(Period(PeriodType.YEAR, LocalDate.now()))
     val period: StateFlow<Period> = _period.asStateFlow()
     fun setPeriod(p: Period) {
         _period.value = p
-    }
-
-    /** Jahre, für die ein Export möglich ist (mit Einträgen, plus das aktuelle Jahr). */
-    val exportYears: StateFlow<List<Int>> = repo.classifiedDays.map { days ->
-        (days.map { it.day.date.year } + LocalDate.now().year).distinct().sortedDescending()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), listOf(LocalDate.now().year))
-
-    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
-    val messages: SharedFlow<String> = _messages
-
-    fun showMessage(text: String) {
-        _messages.tryEmit(text)
     }
 
     private val _busy = MutableStateFlow(false)
@@ -142,7 +294,8 @@ class MainViewModel(
                 val all = days.value ?: emptyList()
                 val period = Period(PeriodType.YEAR, LocalDate.of(year, 1, 1))
                 val inYear = all.filter { period.contains(it.day.date) }
-                val summary = Stats.summarize(inYear)
+                val workMap = WorkSplitter.byDate(repo.getAllShifts(), LocalDateTime.now())
+                val summary = Stats.summarize(inYear, period, workMap)
                 val driver = settings.driverName.value
                 val rules = settings.rules.value
                 val file = withContext(Dispatchers.IO) {
@@ -150,10 +303,10 @@ class MainViewModel(
                     dir.listFiles()?.forEach(File::delete)
                     when (format) {
                         ExportFormat.PDF -> File(dir, "Fahrtenbuch_$year.pdf").also {
-                            PdfExporter.write(it, year, inYear, summary, driver, rules)
+                            PdfExporter.write(it, year, inYear, summary, driver, rules, workMap)
                         }
                         ExportFormat.CSV -> File(dir, "Fahrtenbuch_$year.csv").also {
-                            it.writeText(CsvExporter.build(year, inYear, summary, driver, rules), Charsets.UTF_8)
+                            it.writeText(CsvExporter.build(year, inYear, summary, driver, rules, workMap), Charsets.UTF_8)
                         }
                     }
                 }
@@ -173,7 +326,11 @@ class MainViewModel(
         val resolver = context.applicationContext.contentResolver
         viewModelScope.launch {
             try {
-                val data = repo.exportData().copy(driverName = settings.driverName.value, rules = settings.rules.value)
+                val data = repo.exportData().copy(
+                    driverName = settings.driverName.value,
+                    rules = settings.rules.value,
+                    workSettings = settings.work.value,
+                )
                 withContext(Dispatchers.IO) {
                     resolver.openOutputStream(uri, "wt")?.use { it.write(Backup.toJson(data).toByteArray()) }
                         ?: error("Datei konnte nicht geöffnet werden")
@@ -214,6 +371,8 @@ class MainViewModel(
                 repo.replaceAll(data)
                 if (data.driverName.isNotBlank()) settings.setDriverName(data.driverName)
                 data.rules?.let { settings.setShortSingleDayAsHalf(it.shortSingleDayAsHalf) }
+                data.workSettings?.let { settings.setWorkSettings(it) }
+                work.onReminderSettingsChanged()
                 showMessage("Datensicherung geladen: ${data.days.size} Tage")
             } catch (e: Exception) {
                 showMessage("Wiederherstellen fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
@@ -229,7 +388,7 @@ class MainViewModel(
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as FahrtenbuchApp
-                MainViewModel(app.repository, app.settings)
+                MainViewModel(app.repository, app.settings, app.work, app)
             }
         }
     }

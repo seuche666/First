@@ -47,6 +47,9 @@ import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.Countries
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import de.fernfahrer.fahrtenbuch.domain.Format
+import de.fernfahrer.fahrtenbuch.domain.WorkPortion
+import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
+import androidx.compose.material.icons.rounded.Hotel
 import de.fernfahrer.fahrtenbuch.ui.MainViewModel
 import de.fernfahrer.fahrtenbuch.ui.components.DayTypeBadge
 import de.fernfahrer.fahrtenbuch.ui.components.EmptyState
@@ -56,6 +59,7 @@ import java.time.YearMonth
 @Composable
 fun HistoryScreen(vm: MainViewModel, onOpenDay: (Long) -> Unit, onAdd: () -> Unit) {
     val days by vm.days.collectAsStateWithLifecycle()
+    val workByDate by vm.workByDate.collectAsStateWithLifecycle()
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val groups = remember(days) {
         (days ?: emptyList()).groupBy { YearMonth.from(it.day.date) }.toSortedMap(compareByDescending { it })
@@ -93,20 +97,17 @@ fun HistoryScreen(vm: MainViewModel, onOpenDay: (Long) -> Unit, onAdd: () -> Uni
                         MonthHeader(month, entries)
                     }
                     items(entries, key = { it.day.id }) { entry ->
-                        DayCard(entry, onClick = { onOpenDay(entry.day.id) }, modifier = Modifier.animateItem())
+                        DayCard(
+                            entry,
+                            work = workByDate[entry.day.date],
+                            onClick = { onOpenDay(entry.day.id) },
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
         }
     }
-}
-
-/** Arbeitszeit als kurzer Text, z. B. "Arbeit 06:10–17:45". */
-private fun workText(start: Int?, end: Int?): String? = when {
-    start != null && end != null -> "Arbeit ${Format.time(start)}–${Format.time(end)}"
-    start != null -> "Arbeit ab ${Format.time(start)}"
-    end != null -> "Arbeit bis ${Format.time(end)}"
-    else -> null
 }
 
 @Composable
@@ -134,7 +135,7 @@ private fun MonthHeader(month: YearMonth, entries: List<ClassifiedDay>) {
 }
 
 @Composable
-private fun DayCard(entry: ClassifiedDay, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun DayCard(entry: ClassifiedDay, work: List<WorkPortion>?, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val d = entry.day
     Card(
         onClick = onClick,
@@ -173,6 +174,14 @@ private fun DayCard(entry: ClassifiedDay, onClick: () -> Unit, modifier: Modifie
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (entry.overnight) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Rounded.Hotel, "Übernachtung im LKW",
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                     if (d.tourId != null) {
                         Spacer(Modifier.width(6.dp))
                         Icon(
@@ -185,14 +194,14 @@ private fun DayCard(entry: ClassifiedDay, onClick: () -> Unit, modifier: Modifie
                 Text(
                     buildString {
                         append("${Format.time(d.startMinute)}–${Format.time(d.endMinute)}")
-                        d.distanceKm?.let { append(" · ${Format.km(it)}") }
+                        d.distanceKm?.let { append(" · " + (if (d.kmInterpolated) "~" else "") + Format.km(it)) }
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                workText(d.workStartMinute, d.workEndMinute)?.let {
+                work?.takeIf { it.isNotEmpty() }?.let {
                     Text(
-                        it,
+                        "Arbeit " + WorkSplitter.label(it),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                     )

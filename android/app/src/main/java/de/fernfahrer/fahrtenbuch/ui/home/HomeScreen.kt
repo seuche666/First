@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddCircle
 import androidx.compose.material.icons.rounded.CalendarMonth
@@ -30,8 +32,8 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.LocalShipping
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.WorkHistory
-import androidx.compose.material.icons.rounded.WorkOff
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -51,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import de.fernfahrer.fahrtenbuch.data.WorkShiftEntity
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.Countries
 import de.fernfahrer.fahrtenbuch.domain.Format
@@ -58,27 +61,45 @@ import de.fernfahrer.fahrtenbuch.domain.Period
 import de.fernfahrer.fahrtenbuch.domain.PeriodType
 import de.fernfahrer.fahrtenbuch.domain.Stats
 import de.fernfahrer.fahrtenbuch.domain.Summary
+import de.fernfahrer.fahrtenbuch.domain.WorkPortion
+import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
 import de.fernfahrer.fahrtenbuch.ui.ActiveTour
 import de.fernfahrer.fahrtenbuch.ui.MainViewModel
 import de.fernfahrer.fahrtenbuch.ui.components.DayTypeBadge
 import de.fernfahrer.fahrtenbuch.ui.components.SectionCard
 import de.fernfahrer.fahrtenbuch.ui.components.StatRow
 import de.fernfahrer.fahrtenbuch.ui.components.StatTile
+import de.fernfahrer.fahrtenbuch.ui.components.rememberStartWorkFlow
 import de.fernfahrer.fahrtenbuch.ui.editor.EditorMode
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 @Composable
 fun HomeScreen(vm: MainViewModel, onOpenEditor: (id: Long, mode: EditorMode) -> Unit) {
     val days by vm.days.collectAsStateWithLifecycle()
     val tour by vm.activeTour.collectAsStateWithLifecycle()
+    val running by vm.runningShift.collectAsStateWithLifecycle()
+    val workByDate by vm.workByDate.collectAsStateWithLifecycle()
+    val now by vm.now.collectAsStateWithLifecycle()
+    val workSettings by vm.workSettings.collectAsStateWithLifecycle()
     val all = days ?: emptyList()
     val today = LocalDate.now()
     val todayEntry = all.firstOrNull { it.day.date == today }
 
     val week = remember(all) { Period(PeriodType.WEEK, today) }
     val year = remember(all) { Period(PeriodType.YEAR, today) }
-    val weekSummary = remember(all) { Stats.summarize(all, week) }
-    val yearSummary = remember(all) { Stats.summarize(all, year) }
+    val weekSummary = remember(all, workByDate) { Stats.summarize(all, week, workByDate) }
+    val yearSummary = remember(all, workByDate) { Stats.summarize(all, year, workByDate) }
+
+    val startWork = rememberStartWorkFlow(
+        gps = workSettings.gpsEnabled,
+        reminder = workSettings.reminderEnabled,
+        reminderHours = workSettings.reminderHours,
+        alreadyExplained = { vm.permissionsExplained },
+        markExplained = vm::markPermissionsExplained,
+        onStart = vm::startWork,
+    )
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars),
@@ -107,9 +128,7 @@ fun HomeScreen(vm: MainViewModel, onOpenEditor: (id: Long, mode: EditorMode) -> 
                     TourCard(
                         tour = activeTour,
                         onDay = { onOpenEditor(0, EditorMode.TOUR_DAY) },
-                        onEnd = { onOpenEditor(0, EditorMode.TOUR_END) },
-                        onWorkStart = { vm.stampWorkTime(isStart = true) },
-                        onWorkEnd = { vm.stampWorkTime(isStart = false) },
+                        onEnd = { vm.requestEndTour() },
                     )
                 } else {
                     CaptureButtons(
@@ -119,6 +138,16 @@ fun HomeScreen(vm: MainViewModel, onOpenEditor: (id: Long, mode: EditorMode) -> 
                     )
                 }
             }
+        }
+
+        item {
+            WorkCard(
+                running = running,
+                now = now,
+                todayPortions = workByDate[today],
+                onStart = startWork,
+                onEnd = { vm.requestEndWork() },
+            )
         }
 
         item {
@@ -183,13 +212,7 @@ private fun CaptureButtons(todayEntered: Boolean, onCapture: () -> Unit, onStart
 }
 
 @Composable
-private fun TourCard(
-    tour: ActiveTour,
-    onDay: () -> Unit,
-    onEnd: () -> Unit,
-    onWorkStart: () -> Unit,
-    onWorkEnd: () -> Unit,
-) {
+private fun TourCard(tour: ActiveTour, onDay: () -> Unit, onEnd: () -> Unit) {
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
@@ -230,23 +253,6 @@ private fun TourCard(
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                WorkButton(
-                    label = "Arbeit beginnen",
-                    time = tour.todayWorkStart,
-                    icon = Icons.Rounded.WorkHistory,
-                    onClick = onWorkStart,
-                    modifier = Modifier.weight(1f),
-                )
-                WorkButton(
-                    label = "Arbeit beenden",
-                    time = tour.todayWorkEnd,
-                    icon = Icons.Rounded.WorkOff,
-                    onClick = onWorkEnd,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Spacer(Modifier.height(10.dp))
             FilledTonalButton(
                 onClick = onEnd,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -264,34 +270,84 @@ private fun TourCard(
     }
 }
 
-/** Ein-Tipp-Button: trägt die aktuelle Uhrzeit als Arbeitsbeginn oder -ende für heute ein. */
+/** Arbeitszeit für die Firma: läuft sie, mit Beginn und Dauer; sonst „Arbeit beginnen“. */
 @Composable
-private fun WorkButton(
-    label: String,
-    time: Int?,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
+private fun WorkCard(
+    running: WorkShiftEntity?,
+    now: LocalDateTime,
+    todayPortions: List<WorkPortion>?,
+    onStart: () -> Unit,
+    onEnd: () -> Unit,
 ) {
-    FilledTonalButton(
-        onClick = onClick,
-        modifier = modifier.height(64.dp),
-        shape = MaterialTheme.shapes.large,
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.primary,
+    val start = running?.start
+    Card(
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = if (running != null) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = if (running != null) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface,
         ),
     ) {
-        Icon(icon, null, Modifier.size(22.dp))
-        Spacer(Modifier.width(8.dp))
-        Column {
-            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-            Text(
-                time?.let { "✓ ${Format.time(it)}" } ?: "jetzt eintragen",
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-            )
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Work, null)
+                Spacer(Modifier.width(10.dp))
+                Text("Arbeitszeit", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (running != null) {
+                    Box(Modifier.size(10.dp).padding(1.dp)) {
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.fillMaxSize()) {}
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text("läuft", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            if (running != null && start != null) {
+                val elapsed = Duration.between(start, now).toMinutes().coerceAtLeast(0).toInt()
+                val sinceText = if (start.toLocalDate() == now.toLocalDate()) {
+                    "seit ${Format.time(running.startMinute!!)} Uhr"
+                } else {
+                    "seit ${Format.weekdayShort(start.toLocalDate())}., ${Format.time(running.startMinute!!)} Uhr"
+                }
+                Text("Arbeit läuft $sinceText", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "${Format.duration(elapsed)}" + (running.kmStart?.let { " · Start-km ${Format.number(it)}" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(14.dp))
+                Button(
+                    onClick = onEnd,
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary,
+                    ),
+                ) {
+                    Icon(Icons.Rounded.Stop, null, Modifier.size(26.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Arbeit beenden", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                Text(
+                    if (todayPortions.isNullOrEmpty()) {
+                        "Heute noch keine Arbeitszeit erfasst."
+                    } else {
+                        "Heute: ${WorkSplitter.label(todayPortions)} · ${Format.duration(WorkSplitter.minutes(todayPortions))}"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(14.dp))
+                FilledTonalButton(
+                    onClick = onStart,
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, null, Modifier.size(26.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Arbeit beginnen", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
@@ -351,6 +407,11 @@ private fun SummaryCard(
             StatTile(summary.full.toString(), "volle Tage", Modifier.weight(1f))
             StatTile(summary.half.toString(), "halbe Tage", Modifier.weight(1f))
             StatTile(Format.number(summary.km), "km", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(8.dp))
+        StatRow {
+            StatTile(summary.overnights.toString(), "Übernachtungen im LKW", Modifier.weight(1f))
+            StatTile(Format.duration(summary.workMinutes).removeSuffix(" Std."), "Std. Arbeitszeit", Modifier.weight(1f))
         }
         if (showAbroad) {
             Spacer(Modifier.height(12.dp))

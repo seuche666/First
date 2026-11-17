@@ -125,14 +125,37 @@ class ClassificationTest {
         assertTrue(c.fullReason.startsWith("Manuell geändert"))
     }
 
+    // ---------- Übernachtung im LKW ----------
+
     @Test
-    fun arbeitszeitAendertEinordnungNicht() {
-        val ohne = day(1, "2026-03-02", start = 8 * 60, end = 12 * 60)
-        val mit = ohne.copy(workStartMinute = 6 * 60, workEndMinute = 20 * 60)
-        val a = Classifier.classifyAll(listOf(ohne), emptyList()).single()
-        val b = Classifier.classifyAll(listOf(mit), emptyList()).single()
-        assertEquals(a.type, b.type)
-        assertEquals(DayType.NONE, b.type)
-        assertEquals(14 * 60, mit.workMinutes)
+    fun uebernachtungAutomatischBeiTourAusserAmRueckreisetag() {
+        val tour = TourEntity(id = 1, ended = true)
+        val days = listOf(
+            day(1, "2026-03-02", start = 300, tour = 1),
+            day(2, "2026-03-03", tour = 1),
+            day(3, "2026-03-04", end = 900, tour = 1),
+            day(4, "2026-03-06", start = 300, end = 1000),
+        )
+        val c = Classifier.classifyAll(days, listOf(tour)).associate { it.day.id to it.overnight }
+        assertEquals(true, c[1])
+        assertEquals(true, c[2])
+        assertEquals(false, c[3])
+        assertEquals(false, c[4])
+    }
+
+    @Test
+    fun laufendeTourHeuteMitUebernachtung() {
+        val tour = TourEntity(id = 1, ended = false)
+        val c = Classifier.classifyAll(listOf(day(1, "2026-03-02", start = 300, tour = 1)), listOf(tour)).single()
+        assertTrue(c.overnight)
+    }
+
+    @Test
+    fun uebernachtungVonHandHatVorrang() {
+        val tour = TourEntity(id = 1, ended = false)
+        val abgewaehlt = day(1, "2026-03-02", start = 300, tour = 1).copy(overnightOverride = false)
+        assertFalse(Classifier.classifyAll(listOf(abgewaehlt), listOf(tour)).single().overnight)
+        val eintaegig = day(2, "2026-03-05", start = 300, end = 1000).copy(overnightOverride = true)
+        assertTrue(Classifier.classifyAll(listOf(eintaegig), emptyList()).single().overnight)
     }
 }

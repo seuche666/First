@@ -2,6 +2,8 @@ package de.fernfahrer.fahrtenbuch
 
 import de.fernfahrer.fahrtenbuch.data.DayEntity
 import de.fernfahrer.fahrtenbuch.data.TourEntity
+import de.fernfahrer.fahrtenbuch.data.WorkShiftEntity
+import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
 import de.fernfahrer.fahrtenbuch.domain.Classifier
 import de.fernfahrer.fahrtenbuch.domain.Period
 import de.fernfahrer.fahrtenbuch.domain.PeriodType
@@ -61,13 +63,20 @@ class StatsTest {
 
     @Test
     fun firmenregelUndArbeitszeitInDerAuswertung() {
-        val withWork = days.map { if (it.id == 5L) it.copy(workStartMinute = 360, workEndMinute = 1080) else it }
-        val c = Classifier.classifyAll(withWork, listOf(tour), de.fernfahrer.fahrtenbuch.domain.CountingRules(true))
-        val s = Stats.summarize(c, Period(PeriodType.YEAR, LocalDate.parse("2026-06-01")))
+        val c = Classifier.classifyAll(days, listOf(tour), de.fernfahrer.fahrtenbuch.domain.CountingRules(true))
+        val shifts = listOf(
+            WorkShiftEntity(1, LocalDate.parse("2026-04-10"), 360, LocalDate.parse("2026-04-10"), 1080),
+            // im Vorjahr: zählt nicht mit
+            WorkShiftEntity(2, LocalDate.parse("2025-12-31"), 1380, LocalDate.parse("2026-01-01"), 120),
+        )
+        val work = WorkSplitter.byDate(shifts, java.time.LocalDateTime.now())
+        val s = Stats.summarize(c, Period(PeriodType.YEAR, LocalDate.parse("2026-06-01")), work)
         // Tag 6 (4 Std., eintägig) zählt jetzt als halber Tag nach Firmenregel
         assertEquals(4, s.half)
         assertEquals(0, s.notCounted)
         assertEquals(1, s.companyRuleDays)
-        assertEquals(12 * 60, s.workMinutes)
+        // 12 Std. am 10.04. + 2 Std. am 01.01. (Teil der Schicht über Silvester)
+        assertEquals(14 * 60, s.workMinutes)
+        assertEquals(3, s.overnights)
     }
 }

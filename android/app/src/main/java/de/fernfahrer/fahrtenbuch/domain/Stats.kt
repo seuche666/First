@@ -22,6 +22,8 @@ data class Summary(
     val companyRuleDays: Int = 0,
     /** Summe der erfassten Arbeitszeit in Minuten (nur für die Firma). */
     val workMinutes: Int = 0,
+    /** Anzahl Übernachtungen im LKW. */
+    val overnights: Int = 0,
 ) {
     /** Tage unterwegs = volle + halbe Tage. */
     val daysAway: Int get() = full + half
@@ -37,7 +39,14 @@ data class ChartBar(val label: String, val value: Int)
 object Stats {
     const val HOME_COUNTRY = "DE"
 
-    fun summarize(days: List<ClassifiedDay>, period: Period? = null): Summary {
+    /**
+     * @param work Tagesanteile der Arbeitsschichten (siehe [WorkSplitter.byDate]) für die Arbeitszeit-Summe.
+     */
+    fun summarize(
+        days: List<ClassifiedDay>,
+        period: Period? = null,
+        work: Map<LocalDate, List<WorkPortion>> = emptyMap(),
+    ): Summary {
         val selected = if (period == null) days else days.filter { period.contains(it.day.date) }
         val byCountry = selected.filter { it.type != DayType.NONE }
             .groupBy { it.day.countryCode }
@@ -55,7 +64,9 @@ object Stats {
             germany = germany,
             abroad = abroad,
             companyRuleDays = selected.count { it.byCompanyRule },
-            workMinutes = selected.sumOf { it.day.workMinutes ?: 0 },
+            workMinutes = work.filterKeys { period == null || period.contains(it) }
+                .values.sumOf { WorkSplitter.minutes(it) },
+            overnights = selected.count { it.overnight },
         )
     }
 

@@ -1,11 +1,13 @@
 package de.fernfahrer.fahrtenbuch.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 /** Eine mehrtägige Tour. Beginn und Ende ergeben sich aus den zugehörigen Tagen. */
 @Entity(tableName = "tours")
@@ -43,22 +45,53 @@ data class DayEntity(
     val tourId: Long? = null,
     /** Manuell gesetzte Einordnung; null = automatisch. */
     val dayTypeOverride: DayType? = null,
-    /** Arbeitsbeginn für die Firma (Minuten ab Mitternacht); hat keinen Einfluss auf die Steuer-Einordnung. */
-    val workStartMinute: Int? = null,
-    /** Arbeitsende für die Firma (Minuten ab Mitternacht, 1440 = 24:00). */
-    val workEndMinute: Int? = null,
+    /**
+     * Arbeitszeit aus App-Version 1.0.6 (ein Zeitraum pro Tag). Seit Datenbank-Version 3 steht die
+     * Arbeitszeit in [WorkShiftEntity]; diese Spalten bleiben unverändert als Sicherung erhalten.
+     */
+    @ColumnInfo(name = "workStartMinute") val legacyWorkStartMinute: Int? = null,
+    @ColumnInfo(name = "workEndMinute") val legacyWorkEndMinute: Int? = null,
+    /** Land wurde von Hand gewählt – die GPS-Erkennung ändert es dann nie. Alte Einträge: ja. */
+    @ColumnInfo(defaultValue = "1") val countryManual: Boolean = false,
+    /** Übernachtung im LKW von Hand gesetzt; null = automatisch (bei mehrtägiger Tour). */
+    val overnightOverride: Boolean? = null,
+    /** km-Stände wurden bei einer Schicht über Mitternacht anteilig geschätzt. */
+    @ColumnInfo(defaultValue = "0") val kmInterpolated: Boolean = false,
+    /**
+     * Abwesenheitszeiten wurden automatisch aus der Arbeitszeit vorgeschlagen (nicht von Hand
+     * bestätigt). Nur dann passt die App sie beim Arbeitsende noch an.
+     */
+    @ColumnInfo(defaultValue = "0") val timesAuto: Boolean = false,
 ) {
     val absenceMinutes: Int get() = (endMinute - startMinute).coerceAtLeast(0)
-
-    /** Arbeitszeit in Minuten, falls Beginn und Ende erfasst sind. */
-    val workMinutes: Int?
-        get() = if (workStartMinute != null && workEndMinute != null && workEndMinute > workStartMinute) {
-            workEndMinute - workStartMinute
-        } else {
-            null
-        }
 
     /** Gefahrene km, falls beide Kilometerstände vorhanden und plausibel sind. */
     val distanceKm: Int?
         get() = if (kmStart != null && kmEnd != null && kmEnd >= kmStart) kmEnd - kmStart else null
+}
+
+/**
+ * Eine Arbeitsschicht für die Firma. Sie kann über Mitternacht und mehrere Tage laufen; die
+ * Aufteilung auf die Kalendertage berechnet [de.fernfahrer.fahrtenbuch.domain.WorkSplitter].
+ * Hat keinen Einfluss auf die Steuer-Einordnung.
+ */
+@Entity(tableName = "work_shifts", indices = [Index("startDate")])
+data class WorkShiftEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val startDate: LocalDate,
+    /** Beginn in Minuten ab Mitternacht; null nur bei unvollständigen alten Einträgen. */
+    val startMinute: Int?,
+    /** Ende; beide null, solange die Arbeit läuft oder bei unvollständigen alten Einträgen. */
+    val endDate: LocalDate?,
+    /** Ende in Minuten ab Mitternacht (1440 = 24:00). */
+    val endMinute: Int?,
+    /** true = Arbeit läuft gerade (höchstens eine Schicht). */
+    val running: Boolean = false,
+    /** km-Stand bei Arbeitsbeginn und -ende. */
+    val kmStart: Int? = null,
+    val kmEnd: Int? = null,
+) {
+    val start: LocalDateTime? get() = startMinute?.let { startDate.atStartOfDay().plusMinutes(it.toLong()) }
+    val end: LocalDateTime?
+        get() = if (endDate != null && endMinute != null) endDate.atStartOfDay().plusMinutes(endMinute.toLong()) else null
 }

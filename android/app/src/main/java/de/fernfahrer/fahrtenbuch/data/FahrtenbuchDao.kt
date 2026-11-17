@@ -76,4 +76,33 @@ interface FahrtenbuchDao {
 
     @Query("DELETE FROM tours")
     suspend fun deleteAllTours()
+
+    // ---------- Arbeitsschichten ----------
+
+    @Query("SELECT * FROM work_shifts ORDER BY startDate, startMinute")
+    fun observeShifts(): Flow<List<WorkShiftEntity>>
+
+    @Query("SELECT * FROM work_shifts ORDER BY startDate, startMinute")
+    suspend fun getAllShifts(): List<WorkShiftEntity>
+
+    @Query("SELECT * FROM work_shifts WHERE running = 1 ORDER BY id DESC LIMIT 1")
+    suspend fun getRunningShift(): WorkShiftEntity?
+
+    @Query("SELECT * FROM work_shifts WHERE id = :id")
+    suspend fun getShift(id: Long): WorkShiftEntity?
+
+    @Insert
+    suspend fun insertShift(shift: WorkShiftEntity): Long
+
+    @Insert
+    suspend fun insertShifts(shifts: List<WorkShiftEntity>)
+
+    @Update
+    suspend fun updateShift(shift: WorkShiftEntity)
+
+    @Query("DELETE FROM work_shifts WHERE id = :id")
+    suspend fun deleteShift(id: Long)
+
+    @Query("DELETE FROM work_shifts")
+    suspend fun deleteAllShifts()
 }

@@ -31,6 +31,10 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Work
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Hotel
+import androidx.compose.material3.Switch
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -82,17 +86,16 @@ import de.fernfahrer.fahrtenbuch.ui.components.TimePickerDialog
 @Composable
 fun EditorScreen(
     onDone: (message: String?) -> Unit,
+    mainVm: MainViewModel,
     vm: EditorViewModel = viewModel(factory = EditorViewModel.Factory),
-    mainVm: MainViewModel = viewModel(factory = MainViewModel.Factory),
 ) {
     val s by vm.state.collectAsStateWithLifecycle()
+    val shiftDraft by vm.shift.collectAsStateWithLifecycle()
     val recent by mainVm.recentCountries.collectAsStateWithLifecycle()
 
     var pickDate by rememberSaveable { mutableStateOf(false) }
     var pickStart by rememberSaveable { mutableStateOf(false) }
     var pickEnd by rememberSaveable { mutableStateOf(false) }
-    var pickWorkStart by rememberSaveable { mutableStateOf(false) }
-    var pickWorkEnd by rememberSaveable { mutableStateOf(false) }
     var pickCountry by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
@@ -148,7 +151,6 @@ fun EditorScreen(
                         Text(
                             when (s.mode) {
                                 EditorMode.TOUR_START -> "Tour starten"
-                                EditorMode.TOUR_END -> "Tour beenden"
                                 else -> "Speichern"
                             },
                             style = MaterialTheme.typography.titleMedium,
@@ -205,34 +207,55 @@ fun EditorScreen(
                 )
             }
 
-            // Arbeitszeit für die Firma
+            // Arbeitszeit für die Firma (Schichten, an Mitternacht geteilt)
             FieldCard(icon = Icons.Rounded.Work, title = "Arbeitszeit (für die Firma)") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TimeTile(
-                        "Arbeitsbeginn", s.workStart?.let(Format::time) ?: "--:--", Modifier.weight(1f),
-                    ) { pickWorkStart = true }
-                    TimeTile(
-                        "Arbeitsende", s.workEnd?.let(Format::time) ?: "--:--", Modifier.weight(1f),
-                    ) { pickWorkEnd = true }
-                }
-                if (s.workStart != null || s.workEnd != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            s.workMinutes?.let { "Arbeitszeit: ${Format.duration(it)}" } ?: "Arbeitszeit noch unvollständig",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = {
-                            vm.setWorkStart(null)
-                            vm.setWorkEnd(null)
-                        }) { Text("Leeren") }
-                    }
+                if (s.work.isEmpty()) {
+                    Text(
+                        "An diesem Tag ist keine Arbeitszeit erfasst.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
-                    Spacer(Modifier.height(6.dp))
+                    s.work.forEach { portion ->
+                        Surface(
+                            onClick = { vm.editShift(portion.shiftId) },
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        ) {
+                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(portion.label, style = MaterialTheme.typography.titleMedium)
+                                    val hint = buildList {
+                                        if (portion.fromPreviousDay) add("seit dem Vortag")
+                                        if (portion.toNextDay) add("geht am Folgetag weiter")
+                                        portion.minutes?.let { add(Format.duration(it)) }
+                                    }.joinToString(" · ")
+                                    if (hint.isNotEmpty()) {
+                                        Text(
+                                            hint,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                Icon(Icons.Rounded.Edit, "Arbeitszeit bearbeiten", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                    Text(
+                        "Summe an diesem Tag: ${Format.duration(s.workMinutes)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                TextButton(onClick = vm::newShift) {
+                    Icon(Icons.Rounded.Add, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Arbeitszeit hinzufügen")
                 }
                 Text(
-                    "Hat keinen Einfluss auf die Einordnung für die Steuer.",
+                    "Arbeitszeiten über Mitternacht teilt die App automatisch auf die Tage auf. " +
+                        "Sie haben keinen Einfluss auf die Einordnung für die Steuer.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -252,7 +275,7 @@ fun EditorScreen(
                         Column(Modifier.weight(1f)) {
                             Text(Countries.name(s.countryCode), style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Tippen zum Ändern",
+                                if (s.countryManual) "Von Hand gewählt · tippen zum Ändern" else "Vorschlag (GPS/Vortag) · tippen zum Ändern",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -291,7 +314,9 @@ fun EditorScreen(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    s.distanceKm?.let { "Gefahren: ${Format.km(it)}" } ?: "Gefahrene km werden automatisch berechnet.",
+                    s.distanceKm?.let {
+                        "Gefahren: ${Format.km(it)}" + if (s.kmEstimated) " (anteilig geschätzt)" else ""
+                    } ?: "Gefahrene km werden automatisch berechnet.",
                     style = if (s.distanceKm != null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
                     color = if (s.distanceKm != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -320,6 +345,28 @@ fun EditorScreen(
                             )
                         }
                     }
+                }
+            }
+
+            // Übernachtung im LKW
+            FieldCard(icon = Icons.Rounded.Hotel, title = "Übernachtung im LKW") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (s.overnight) "Ja, die Nacht nach diesem Tag im LKW" else "Nein",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            when {
+                                s.overnightOverride == null && s.overnightAuto -> "Automatisch: Nacht während der Tour"
+                                s.overnightOverride == null -> "Automatisch: keine Tour über Nacht"
+                                else -> "Von Hand geändert"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = s.overnight, onCheckedChange = vm::setOvernightInTruck)
                 }
             }
 
@@ -391,21 +438,14 @@ fun EditorScreen(
             vm.setEnd(it)
         }
     }
-    if (pickWorkStart) {
-        TimePickerDialog("Arbeitsbeginn", s.workStart ?: Format.nowMinutes(), onDismiss = { pickWorkStart = false }) {
-            pickWorkStart = false
-            vm.setWorkStart(it)
-        }
-    }
-    if (pickWorkEnd) {
-        TimePickerDialog(
-            "Arbeitsende",
-            s.workEnd?.let { if (it == MIDNIGHT) 0 else it } ?: Format.nowMinutes(),
-            onDismiss = { pickWorkEnd = false },
-        ) {
-            pickWorkEnd = false
-            vm.setWorkEnd(it)
-        }
+    shiftDraft?.let { draft ->
+        ShiftDialog(
+            draft = draft,
+            onChange = vm::updateShift,
+            onSave = vm::saveShift,
+            onDelete = vm::deleteShift,
+            onDismiss = vm::closeShift,
+        )
     }
     if (pickCountry) {
         CountryPickerSheet(
@@ -444,9 +484,9 @@ private fun missingText(s: EditorState): String {
 @Composable
 private fun TourBanner(s: EditorState) {
     val text = when (s.mode) {
-        EditorMode.TOUR_START -> "Heute beginnt deine Tour. Der erste Tag zählt als Anreisetag (halber Tag)."
+        EditorMode.TOUR_START -> "Heute beginnt deine Tour. Der erste Tag zählt als Anreisetag (halber Tag). " +
+            "Die Arbeitszeit beginnt automatisch mit."
         EditorMode.TOUR_DAY -> s.tourStart?.let { "Tour seit ${Format.weekdayDate(it)}. Tage mitten in der Tour zählen als volle Tage." }
-        EditorMode.TOUR_END -> "Heute endet deine Tour. Der letzte Tag zählt als Rückreisetag (halber Tag)."
         EditorMode.NORMAL -> s.tourStart?.let { "Dieser Tag gehört zur Tour ab ${Format.weekdayDate(it)}." }
     } ?: return
     Card(

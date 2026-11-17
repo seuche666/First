@@ -31,9 +31,29 @@ Ist sie an, zählt jede eintägige Fahrt als halber Tag. Weil das Finanzamt daf�
 verlangt, werden solche Tage in der Begründung, in der Auswertung und im Export (PDF: †, CSV: Spalte
 „Firmenregel“) gekennzeichnet, und die aktive Regel steht im Kopf des Exports.
 
-**Arbeitszeit:** Arbeitsbeginn und -ende werden pro Tag getrennt von der Abwesenheit gespeichert
-(während einer Tour ist die Abwesenheit z. B. 00:00–24:00). Beim Tourstart wird der Arbeitsbeginn,
-beim Tourende das Arbeitsende automatisch mitgesetzt; alles lässt sich von Hand ändern.
+**Arbeitszeit (für die Firma):** „Arbeit beginnen“ / „Arbeit beenden“ auf dem Startbildschirm (mit und
+ohne Tour). Eine begonnene Arbeitszeit läuft durchgehend weiter – auch über Mitternacht und mehrere
+Tage – und wird automatisch an den Tagesgrenzen aufgeteilt (z. B. Sonntag 23:30–24:00, Montag
+00:00–10:00). Der Startbildschirm zeigt, seit wann die Arbeit läuft. Tourstart beginnt die Arbeitszeit
+automatisch, Tourende beendet sie mit. Arbeitszeiten haben keinen Einfluss auf die Steuer-Einordnung.
+
+**Kilometer:** Der Start-km eines neuen Tages bzw. Arbeitsbeginns ist automatisch der letzte bekannte
+km-Stand. Beim „Arbeit beenden“ und „Tour beenden“ fragt ein kleines Fenster nach dem km-Stand (mit
+„Später“). Bei Arbeitszeiten über Mitternacht werden die km anteilig nach Arbeitszeit auf die Tage
+verteilt (Summe stimmt genau, Kennzeichnung „~“ bzw. „km anteilig geschätzt“ im Export).
+
+**Erinnerung:** Läuft eine Arbeitszeit länger als 15 Stunden (einstellbar, abschaltbar), erscheint
+„Arbeit läuft seit 15 Std. – vergessen zu beenden?“ mit „Arbeit beenden“ und „Läuft noch“ (erneut nach
+3 Stunden).
+
+**Land per GPS (offline):** Bei Arbeitsbeginn, Arbeitsende und beim Öffnen der App nach Mitternacht
+während einer laufenden Arbeitszeit wird das Land einmalig per GPS ermittelt – kein Dauer-GPS, kein
+Internet. Die Ländergrenzen liegen in der App (`assets/country_borders.bin`, Natural Earth 1:10m; erzeugt
+mit `tools/build_country_borders.py`). Genauigkeit an Grenzen ca. 1 km; von Hand gewählte Länder haben
+immer Vorrang. Abschaltbar in den Einstellungen.
+
+**Übernachtung im LKW:** Schalter pro Tag; bei mehrtägiger Tour automatisch für jede Nacht (außer am
+Rückreisetag). Anzahl in Auswertung, PDF und CSV.
 
 Eine Tour, die am selben Tag beginnt und endet, zählt wie eine eintägige Fahrt.
 
@@ -79,11 +99,15 @@ SIGNING_KEYSTORE_PATH=/pfad/zum/keystore.jks SIGNING_PASSWORD=… ./gradlew asse
 
 ## Datenbank und Datensicherung
 
-- Room-Datenbank Version 2 (Arbeitszeit-Spalten). Die Migration 1 → 2 übernimmt alle bestehenden Daten;
-  die Schemata liegen in `app/schemas/`, ein Test (`MigrationTest`) prüft das Update an einer echten
-  Datenbank im alten Format.
-- Datensicherung Format-Version 2 (zusätzlich Arbeitszeiten und Zählregel). Sicherungen der ersten
-  App-Version (Format 1) lassen sich weiterhin laden.
+- Room-Datenbank Version 3 (Arbeitsschichten, Übernachtung, Land-Herkunft). Für jede Änderung gibt es
+  eine Migration (1 → 2 → 3); es wird nie `fallbackToDestructiveMigration` verwendet. Bisherige
+  Arbeitszeiten pro Tag (auch von Hand an Mitternacht getrennte) werden unverändert als Schichten
+  übernommen; die alten Spalten bleiben zusätzlich erhalten.
+- **Vor jeder Migration** legt die App automatisch eine Sicherung an: die unveränderten
+  Datenbankdateien im App-Speicher und eine wiederherstellbare Datensicherung unter
+  `Download/Fahrtenbuch/` (ab Android 10).
+- `MigrationTest` prüft das Update an Datenbanken im Stand der Versionen 1 und 2 mit echten Einträgen.
+- Datensicherung Format-Version 3; Sicherungen der Formate 1 und 2 lassen sich weiterhin laden.
 
 ## Selbst bauen
 

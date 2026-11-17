@@ -9,6 +9,8 @@ import de.fernfahrer.fahrtenbuch.domain.CountingRules
 import de.fernfahrer.fahrtenbuch.domain.Countries
 import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.Summary
+import de.fernfahrer.fahrtenbuch.domain.WorkPortion
+import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
 import java.io.File
 import java.time.LocalDate
 
@@ -38,6 +40,7 @@ object PdfExporter {
         summary: Summary,
         driverName: String,
         rules: CountingRules = CountingRules(),
+        work: Map<LocalDate, List<WorkPortion>> = emptyMap(),
     ) {
         val doc = PdfDocument()
         val w = Writer(doc)
@@ -72,6 +75,7 @@ object PdfExporter {
         w.space(10f)
         w.text("Tage unterwegs gesamt: ${summary.daysAway}  (davon ${summary.full} volle und ${summary.half} halbe Tage)", body, 16f)
         w.text("Davon im Ausland: ${summary.abroadDays} Tage in ${summary.abroad.size} Ländern", body, 16f)
+        w.text("Übernachtungen im LKW: ${summary.overnights}", body, 16f)
         w.text("Gefahrene Kilometer: ${Format.km(summary.km)}", body, 16f)
         if (summary.companyRuleDays > 0) {
             w.text(
@@ -91,45 +95,51 @@ object PdfExporter {
 
         // Einzelne Tage
         w.text("Einzelne Tage", paint(13f, bold = true), 20f)
-        // Spalten: Datum | Land | Abwesend | Dauer | Arbeitszeit | Einordnung | km | Notiz
-        val dayCols = floatArrayOf(70f, 74f, 62f, 40f, 62f, 66f, 38f, CONTENT_W - 412f)
-        val dayHead = listOf("Datum", "Land", "Abwesend", "Dauer", "Arbeitszeit", "Einordnung", "km", "Notiz")
+        // Spalten: Datum | Land | Abwesend | Dauer | Arbeitszeit | Einordnung | Ü | km | Notiz
+        val dayCols = floatArrayOf(68f, 70f, 60f, 38f, 82f, 64f, 16f, 40f, CONTENT_W - 438f)
+        val dayHead = listOf("Datum", "Land", "Abwesend", "Dauer", "Arbeitszeit", "Einordnung", "Ü", "km", "Notiz")
         val small = paint(8.5f)
         val smallHead = paint(8.5f, bold = true, color = muted)
         w.onNewPage = {
-            w.row(dayHead, dayCols, smallHead, rightAt = setOf(6))
+            w.row(dayHead, dayCols, smallHead, rightAt = setOf(7))
             w.line()
         }
         w.onNewPage!!.invoke()
         var anyManual = false
         var anyCompanyRule = false
+        var anyEstimated = false
         days.sortedBy { it.day.date }.forEachIndexed { i, c ->
             val d = c.day
             if (c.isManual) anyManual = true
             if (c.byCompanyRule) anyCompanyRule = true
-            val work = when {
-                d.workStartMinute != null && d.workEndMinute != null ->
-                    "${Format.time(d.workStartMinute)}–${Format.time(d.workEndMinute)}"
-                d.workStartMinute != null -> "ab ${Format.time(d.workStartMinute)}"
-                d.workEndMinute != null -> "bis ${Format.time(d.workEndMinute)}"
-                else -> ""
-            }
+            if (d.kmInterpolated && d.distanceKm != null) anyEstimated = true
+            val workText = WorkSplitter.label(work[d.date])
             w.row(
                 listOf(
                     Format.weekdayShort(d.date) + ", " + Format.date(d.date),
                     Countries.name(d.countryCode),
                     "${Format.time(d.startMinute)}–${Format.time(d.endMinute)}",
                     "%d:%02d h".format(d.absenceMinutes / 60, d.absenceMinutes % 60),
-                    work,
+                    workText,
                     c.type.label + (if (c.isManual) " *" else "") + (if (c.byCompanyRule) " †" else ""),
-                    d.distanceKm?.let { Format.number(it) } ?: "",
+                    if (c.overnight) "Ü" else "",
+                    d.distanceKm?.let { (if (d.kmInterpolated) "~" else "") + Format.number(it) } ?: "",
                     d.note.replace('\n', ' '),
                 ),
-                dayCols, small, rightAt = setOf(6), background = if (i % 2 == 1) zebra else null, rowHeight = 13f,
+                dayCols, small, rightAt = setOf(7), background = if (i % 2 == 1) zebra else null, rowHeight = 13f,
             )
         }
         if (days.isEmpty()) w.text("Keine Einträge in diesem Jahr.", small, 14f)
-        if (anyManual || anyCompanyRule) w.space(6f)
+        if (anyManual || anyCompanyRule || anyEstimated || summary.overnights > 0) w.space(6f)
+        if (summary.overnights > 0) {
+            w.text("Ü = Übernachtung im LKW", paint(8.5f, color = muted), 12f)
+        }
+        if (anyEstimated) {
+            w.text(
+                "~ km anteilig nach Arbeitszeit geschätzt (Arbeitszeit über Mitternacht; Summe stimmt genau)",
+                paint(8.5f, color = muted), 12f,
+            )
+        }
         if (anyManual) {
             w.text("* Einordnung manuell geändert", paint(8.5f, color = muted), 12f)
         }

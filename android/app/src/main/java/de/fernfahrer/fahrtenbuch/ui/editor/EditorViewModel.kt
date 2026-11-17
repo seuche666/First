@@ -438,6 +438,7 @@ class EditorViewModel(
                     ),
                 )
                 work.onReminderSettingsChanged()
+                work.syncTracking()
                 _shift.value = null
             } catch (e: Exception) {
                 _shift.update { it?.copy(error = e.localizedMessage ?: "Speichern fehlgeschlagen") }
@@ -450,6 +451,7 @@ class EditorViewModel(
         viewModelScope.launch {
             repo.deleteShift(d.id)
             work.onReminderSettingsChanged()
+            work.syncTracking()
             _shift.value = null
         }
     }

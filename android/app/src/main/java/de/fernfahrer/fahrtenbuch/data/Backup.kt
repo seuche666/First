@@ -5,6 +5,7 @@ import de.fernfahrer.fahrtenbuch.domain.DayType
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
+import java.util.Base64
 
 /** Einstellungen rund um die Arbeitszeit (ab Sicherungsformat 3). */
 data class WorkSettings(
@@ -12,6 +13,20 @@ data class WorkSettings(
     val reminderHours: Int = 15,
     val gpsEnabled: Boolean = true,
 )
+
+/** Einstellungen der Karte (ab Sicherungsformat 4). */
+data class MapSettings(
+    /** GPS-Strecke während der Arbeitszeit aufzeichnen. */
+    val trackingEnabled: Boolean = true,
+    /** Breite des aufgedeckten Korridors in Metern (gesamt, also je Hälfte links und rechts). */
+    val corridorMeters: Int = DEFAULT_CORRIDOR,
+) {
+    companion object {
+        const val DEFAULT_CORRIDOR = 100
+        val CORRIDOR_OPTIONS = listOf(100, 500, 1000, 5000)
+        fun validCorridor(m: Int) = if (m in CORRIDOR_OPTIONS) m else DEFAULT_CORRIDOR
+    }
+}
 
 data class BackupData(
     val tours: List<TourEntity>,
@@ -23,6 +38,10 @@ data class BackupData(
     val shifts: List<WorkShiftEntity> = emptyList(),
     /** Einstellungen zur Arbeitszeit; null bei älteren Sicherungen. */
     val workSettings: WorkSettings? = null,
+    /** GPS-Strecken (ab Format 4); null bei älteren Sicherungen – vorhandene Strecken bleiben dann erhalten. */
+    val tracks: List<TrackChunkEntity>? = null,
+    /** Einstellungen der Karte; null bei älteren Sicherungen. */
+    val mapSettings: MapSettings? = null,
 )
 
 class BackupFormatException(message: String) : Exception(message)
@@ -51,11 +70,12 @@ object LegacyWork {
  * - 2: zusätzlich Arbeitsbeginn/-ende pro Tag und die Zählregel (Firmenregel)
  * - 3: Arbeitsschichten (über Mitternacht), Land von Hand gewählt, Übernachtung im LKW,
  *      geschätzte km, Einstellungen zur Arbeitszeit
+ * - 4: GPS-Strecken der Karte (Punkte kompakt als Base64) und Einstellungen der Karte
  * Ältere Sicherungen werden weiterhin gelesen; fehlende Felder erhalten sinnvolle Werte.
  */
 object Backup {
     private const val APP_ID = "fahrtenbuch-android"
-    const val VERSION = 3
+    const val VERSION = 4
 
     fun toJson(data: BackupData): String {
         val root = JSONObject()
@@ -71,6 +91,12 @@ object Backup {
                     .put("reminderEnabled", it.reminderEnabled)
                     .put("reminderHours", it.reminderHours)
                     .put("gpsEnabled", it.gpsEnabled),
+            )
+        }
+        data.mapSettings?.let {
+            root.put(
+                "mapSettings",
+                JSONObject().put("trackingEnabled", it.trackingEnabled).put("corridorMeters", it.corridorMeters),
             )
         }
         root.put("tours", JSONArray().apply {
@@ -115,6 +141,20 @@ object Backup {
                 )
             }
         })
+        data.tracks?.let { tracks ->
+            val encoder = Base64.getEncoder()
+            root.put("tracks", JSONArray().apply {
+                tracks.forEach { t ->
+                    put(
+                        JSONObject()
+                            .put("trackId", t.trackId)
+                            .put("seq", t.seq)
+                            .put("countries", t.countries)
+                            .put("points", encoder.encodeToString(t.data)),
+                    )
+                }
+            })
+        }
         return root.toString(2)
     }
 
@@ -198,7 +238,32 @@ object Backup {
                     gpsEnabled = it.optBoolean("gpsEnabled", true),
                 )
             }
-            return BackupData(tours, days, root.optString("driverName", ""), rules, shifts, workSettings)
+            val mapSettings = root.optJSONObject("mapSettings")?.let {
+                MapSettings(
+                    trackingEnabled = it.optBoolean("trackingEnabled", true),
+                    corridorMeters = MapSettings.validCorridor(it.optInt("corridorMeters", MapSettings.DEFAULT_CORRIDOR)),
+                )
+            }
+            val tracks = root.optJSONArray("tracks")?.let { arr ->
+                val decoder = Base64.getDecoder()
+                (0 until arr.length()).map { i ->
+                    val t = arr.getJSONObject(i)
+                    // Abgeleitete Felder (Begrenzung, Länge, Anzahl) werden aus den Punkten neu berechnet.
+                    TrackChunks.rebuild(
+                        TrackChunkEntity(
+                            trackId = t.getLong("trackId"),
+                            seq = t.getInt("seq"),
+                            startTime = 0, endTime = 0, pointCount = 0,
+                            minLatE5 = 0, minLonE5 = 0, maxLatE5 = 0, maxLonE5 = 0, lengthMeters = 0.0,
+                            countries = t.optString("countries", ""),
+                            data = decoder.decode(t.getString("points")),
+                        ),
+                    )
+                }
+            }
+            return BackupData(
+                tours, days, root.optString("driverName", ""), rules, shifts, workSettings, tracks, mapSettings,
+            )
         } catch (e: BackupFormatException) {
             throw e
         } catch (e: Exception) {

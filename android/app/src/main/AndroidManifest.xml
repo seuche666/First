@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Land per GPS: nur einzelne Abfragen bei geöffneter App, kein Hintergrund-Standort -->
+    <!-- Land per GPS (einzelne Abfragen) und Streckenaufzeichnung für die Karte, nur während der Arbeitszeit -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- „Immer erlauben“: damit die Aufzeichnung nach Neustart/Update weiterlaufen kann -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Nur für die Kartenkacheln von OpenStreetMap; deine Daten werden nicht übertragen -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <!-- Erinnerung bei langer Arbeitszeit -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -28,6 +36,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".work.TrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <receiver
             android:name=".work.ReminderReceiver"

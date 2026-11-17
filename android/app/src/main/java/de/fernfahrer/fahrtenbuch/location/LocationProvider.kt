@@ -40,7 +40,8 @@ class LocationProvider(private val context: Context) {
         }
     }
 
-    private suspend fun countryLocator(): CountryLocator = locator ?: withContext(Dispatchers.IO) {
+    /** Ländergrenzen (einmal geladen, danach im Speicher). */
+    suspend fun countryLocator(): CountryLocator = locator ?: withContext(Dispatchers.IO) {
         synchronized(this@LocationProvider) {
             locator ?: context.assets.open(CountryLocator.ASSET_NAME).use(CountryLocator::load).also { locator = it }
         }

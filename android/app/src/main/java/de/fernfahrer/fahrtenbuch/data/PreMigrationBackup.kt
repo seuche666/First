@@ -87,9 +87,16 @@ object PreMigrationBackup {
         }
     }
 
-    /** Liest Tage und Touren aus einer Datenbank der Version 1 oder 2 (nur lesend). */
+    /**
+     * Liest alle Daten aus einer alten Datenbank (nur lesend). Funktioniert für jede bisherige Version:
+     * Spalten und Tabellen, die es in der alten Version noch nicht gab, erhalten sinnvolle Werte.
+     */
     fun readOldDatabase(dbFile: File, driverName: String, rules: CountingRules?): BackupData =
         SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            fun hasTable(name: String) = db.rawQuery(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", arrayOf(name),
+            ).use { it.moveToFirst() }
+
             val tours = db.rawQuery("SELECT id, ended FROM tours", null).use { c ->
                 buildList { while (c.moveToNext()) add(TourEntity(c.getLong(0), c.getInt(1) != 0)) }
             }
@@ -111,19 +118,74 @@ object PreMigrationBackup {
                                     ?.let { v -> DayType.entries.firstOrNull { it.name == v } },
                                 legacyWorkStartMinute = c.int("workStartMinute"),
                                 legacyWorkEndMinute = c.int("workEndMinute"),
-                                countryManual = true,
+                                // Ab Version 3; ältere Einträge gelten als von Hand erfasst.
+                                countryManual = c.int("countryManual")?.let { it != 0 } ?: true,
+                                overnightOverride = c.int("overnightOverride")?.let { it != 0 },
+                                kmInterpolated = c.int("kmInterpolated")?.let { it != 0 } ?: false,
+                                timesAuto = c.int("timesAuto")?.let { it != 0 } ?: false,
                             ),
                         )
                     }
                 }
             }
-            BackupData(tours, days, driverName, rules, LegacyWork.toShifts(days))
+            val shifts = if (hasTable("work_shifts")) {
+                db.rawQuery("SELECT * FROM work_shifts ORDER BY startDate, startMinute", null).use { c ->
+                    buildList {
+                        while (c.moveToNext()) {
+                            add(
+                                WorkShiftEntity(
+                                    id = c.long("id")!!,
+                                    startDate = LocalDate.parse(c.string("startDate")),
+                                    startMinute = c.int("startMinute"),
+                                    endDate = c.string("endDate")?.let(LocalDate::parse),
+                                    endMinute = c.int("endMinute"),
+                                    running = (c.int("running") ?: 0) != 0,
+                                    kmStart = c.int("kmStart"),
+                                    kmEnd = c.int("kmEnd"),
+                                ),
+                            )
+                        }
+                    }
+                }
+            } else {
+                LegacyWork.toShifts(days)
+            }
+            val tracks: List<TrackChunkEntity>? = if (hasTable("track_chunks")) {
+                db.rawQuery("SELECT * FROM track_chunks ORDER BY trackId, seq", null).use { c ->
+                    buildList<TrackChunkEntity> {
+                        while (c.moveToNext()) {
+                            add(
+                                TrackChunkEntity(
+                                    id = c.long("id")!!,
+                                    trackId = c.long("trackId")!!,
+                                    seq = c.int("seq")!!,
+                                    startTime = c.long("startTime")!!,
+                                    endTime = c.long("endTime")!!,
+                                    pointCount = c.int("pointCount")!!,
+                                    minLatE5 = c.int("minLatE5")!!,
+                                    minLonE5 = c.int("minLonE5")!!,
+                                    maxLatE5 = c.int("maxLatE5")!!,
+                                    maxLonE5 = c.int("maxLonE5")!!,
+                                    lengthMeters = c.double("lengthMeters") ?: 0.0,
+                                    countries = c.string("countries").orEmpty(),
+                                    data = c.blob("data") ?: ByteArray(0),
+                                ),
+                            )
+                        }
+                    }
+                }
+            } else {
+                null
+            }
+            BackupData(tours, days, driverName, rules, shifts, tracks = tracks)
         }
 
     private fun Cursor.index(name: String) = getColumnIndex(name).takeIf { it >= 0 && !isNull(it) }
     private fun Cursor.int(name: String): Int? = index(name)?.let(::getInt)
     private fun Cursor.long(name: String): Long? = index(name)?.let(::getLong)
     private fun Cursor.string(name: String): String? = index(name)?.let(::getString)
+    private fun Cursor.double(name: String): Double? = index(name)?.let(::getDouble)
+    private fun Cursor.blob(name: String): ByteArray? = index(name)?.let(::getBlob)
 
     /** Speichert unter Download/Fahrtenbuch (Android 10+, ohne zusätzliche Berechtigung). */
     object DownloadsWriter : PublicWriter {

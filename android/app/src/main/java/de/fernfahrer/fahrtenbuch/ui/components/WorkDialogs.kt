@@ -129,16 +129,19 @@ fun KmDialog(
 
 /** Benötigte Berechtigungen für Erinnerung (Benachrichtigungen) und GPS-Land, die noch fehlen. */
 @Composable
-fun rememberMissingWorkPermissions(gps: Boolean, reminder: Boolean): () -> List<String> {
+fun rememberMissingWorkPermissions(gps: Boolean, reminder: Boolean, tracking: Boolean = false): () -> List<String> {
     val context = LocalContext.current
     return {
         buildList {
             fun missing(p: String) = ContextCompat.checkSelfPermission(context, p) != PackageManager.PERMISSION_GRANTED
-            if (gps && missing(Manifest.permission.ACCESS_FINE_LOCATION) && missing(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            // Für die Strecke braucht es den genauen Standort, für das Land reicht der ungefähre.
+            if ((tracking && missing(Manifest.permission.ACCESS_FINE_LOCATION)) ||
+                (gps && missing(Manifest.permission.ACCESS_FINE_LOCATION) && missing(Manifest.permission.ACCESS_COARSE_LOCATION))
+            ) {
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
                 add(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
-            if (reminder && Build.VERSION.SDK_INT >= 33 && missing(Manifest.permission.POST_NOTIFICATIONS)) {
+            if ((reminder || tracking) && Build.VERSION.SDK_INT >= 33 && missing(Manifest.permission.POST_NOTIFICATIONS)) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
@@ -158,14 +161,73 @@ fun rememberStartWorkFlow(
     alreadyExplained: () -> Boolean,
     markExplained: () -> Unit,
     onStart: (java.time.LocalDateTime) -> Unit,
+    tracking: Boolean = false,
+    backgroundExplained: () -> Boolean = { true },
+    markBackgroundExplained: () -> Unit = {},
 ): () -> Unit {
-    val missing = rememberMissingWorkPermissions(gps, reminder)
+    val context = LocalContext.current
+    val missing = rememberMissingWorkPermissions(gps, reminder, tracking)
     var pendingAt by remember { mutableStateOf<java.time.LocalDateTime?>(null) }
     var showRationale by remember { mutableStateOf(false) }
+    var showBackground by remember { mutableStateOf(false) }
+    val backgroundLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    /** Nach dem Start: einmalig erklären, warum „Immer erlauben“ für die Aufzeichnung hilft. */
+    fun maybeAskBackground() {
+        if (tracking && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !backgroundExplained() &&
+            de.fernfahrer.fahrtenbuch.work.Tracking.hasLocationPermission(context) &&
+            !de.fernfahrer.fahrtenbuch.work.Tracking.hasBackgroundPermission(context)
+        ) {
+            showBackground = true
+        }
+    }
+
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         markExplained()
         pendingAt?.let(onStart)
         pendingAt = null
+        maybeAskBackground()
+    }
+
+    if (showBackground) {
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(Icons.Rounded.LocationOn, null) },
+            title = { Text("Standort „Immer erlauben“?") },
+            text = {
+                Column {
+                    Text(
+                        "Die Strecke wird jetzt während der Arbeitszeit für deine Karte aufgezeichnet – auch wenn " +
+                            "die App im Hintergrund ist (du siehst dann eine Benachrichtigung).",
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Mit „Immer erlauben“ kann Android die Aufzeichnung auch nach einem Neustart des Handys " +
+                            "oder einem App-Update selbst fortsetzen. Aufgezeichnet wird trotzdem nur während der " +
+                            "Arbeitszeit, und die Daten bleiben auf dem Handy.",
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Android öffnet dazu die Einstellung „Standortberechtigung“ – dort „Immer zulassen“ wählen.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBackground = false
+                    markBackgroundExplained()
+                    backgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                }) { Text("Einstellung öffnen") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showBackground = false
+                    markBackgroundExplained()
+                }) { Text("Nicht jetzt") }
+            },
+        )
     }
 
     if (showRationale) {
@@ -176,17 +238,27 @@ fun rememberStartWorkFlow(
                 Column {
                     Text("Damit die App dich unterstützen kann, fragt Android gleich nach diesen Erlaubnissen:")
                     Spacer(Modifier.height(12.dp))
-                    if (gps) {
+                    if (tracking) {
+                        PermissionRow(
+                            Icons.Rounded.LocationOn,
+                            "Standort (genau) – während der Arbeitszeit wird deine Strecke für die Karte " +
+                                "aufgezeichnet" + (if (gps) " und das Land vorgeschlagen" else "") +
+                                ". Nur GPS, kein Internet, die Daten bleiben auf dem Handy.",
+                        )
+                    } else if (gps) {
                         PermissionRow(
                             Icons.Rounded.LocationOn,
                             "Standort – nur bei Arbeitsbeginn und -ende, um das Land vorzuschlagen. " +
                                 "Kein GPS im Hintergrund, kein Internet.",
                         )
                     }
-                    if (reminder) {
+                    if (reminder || tracking) {
                         PermissionRow(
                             Icons.Rounded.Notifications,
-                            "Benachrichtigungen – Erinnerung, wenn die Arbeit länger als $reminderHours Std. läuft.",
+                            "Benachrichtigungen – " + listOfNotNull(
+                                if (reminder) "Erinnerung, wenn die Arbeit länger als $reminderHours Std. läuft" else null,
+                                if (tracking) "Anzeige, dass die Strecke aufgezeichnet wird" else null,
+                            ).joinToString("; ") + ".",
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -214,6 +286,7 @@ fun rememberStartWorkFlow(
             showRationale = true
         } else {
             onStart(at)
+            maybeAskBackground()
         }
     }
 }

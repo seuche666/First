@@ -28,7 +28,7 @@ import java.time.LocalDateTime
 
 /**
  * Prüft, dass Updates der Datenbank keine Einträge verlieren. Die alten Datenbanken werden exakt nach
- * den exportierten Schemata (app/schemas/…/1.json, 2.json) angelegt und mit Daten gefüllt.
+ * den exportierten Schemata (app/schemas/…/1.json … 3.json) angelegt und mit Daten gefüllt.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -71,10 +71,113 @@ class MigrationTest {
         }
     }
 
-    private fun openWithRoom(name: String) = Room.databaseBuilder(context, AppDatabase::class.java, name)
-        .addMigrations(*AppDatabase.MIGRATIONS)
-        .allowMainThreadQueries()
-        .build()
+    private fun openWithRoom(name: String, migrations: Array<androidx.room.migration.Migration> = AppDatabase.MIGRATIONS) =
+        Room.databaseBuilder(context, AppDatabase::class.java, name)
+            .addMigrations(*migrations)
+            .allowMainThreadQueries()
+            .build()
+
+    /** Datenbank im Stand von App-Version 1.0.8 (Datenbank-Version 3) mit Einträgen. */
+    private fun SQLiteDatabase.fillVersion3() {
+        execSQL("INSERT INTO tours (id, ended) VALUES (1, 0)")
+        execSQL(
+            "INSERT INTO days (id, date, startMinute, endMinute, countryCode, kmStart, kmEnd, note, tourId, dayTypeOverride, " +
+                "workStartMinute, workEndMinute, countryManual, overnightOverride, kmInterpolated, timesAuto) VALUES " +
+                "(1, '2026-11-09', 300, 1440, 'DE', 500000, 500700, 'Abfahrt', 1, NULL, NULL, NULL, 1, NULL, 0, 0), " +
+                "(2, '2026-11-10', 0, 1440, 'AT', 500700, 501300, 'Wien', 1, 'FULL', NULL, NULL, 0, 1, 1, 0), " +
+                "(3, '2026-11-11', 0, 900, 'IT', 501300, NULL, '', 1, NULL, NULL, NULL, 0, 0, 0, 1)",
+        )
+        execSQL(
+            "INSERT INTO work_shifts (id, startDate, startMinute, endDate, endMinute, running, kmStart, kmEnd) VALUES " +
+                "(1, '2026-11-09', 330, '2026-11-10', 120, 0, 500000, 500900), " +
+                "(2, '2026-11-11', 360, NULL, NULL, 1, 501300, NULL)",
+        )
+    }
+
+    @Test
+    fun updateVonVersion3Auf4BehaeltAlleEintraege() {
+        createDatabase(dbName, 3) { fillVersion3() }
+        val room = openWithRoom(dbName)
+        try {
+            runBlocking {
+                val dao = room.dao()
+                val days = dao.getAllDays().associateBy { it.id }
+                assertEquals(3, days.size)
+                with(days[2]!!) {
+                    assertEquals("AT", countryCode)
+                    assertEquals(500700 to 501300, kmStart to kmEnd)
+                    assertEquals("Wien", note)
+                    assertEquals(DayType.FULL, dayTypeOverride)
+                    assertFalse(countryManual)
+                    assertEquals(true, overnightOverride)
+                    assertTrue(kmInterpolated)
+                }
+                assertTrue(days[3]!!.timesAuto)
+                assertEquals(false, dao.getTour(1)?.ended)
+
+                val shifts = dao.getAllShifts()
+                assertEquals(2, shifts.size)
+                assertEquals(LocalDate.parse("2026-11-10") to 120, shifts[0].endDate to shifts[0].endMinute)
+                assertEquals(500900, shifts[0].kmEnd)
+                // Die laufende Arbeitszeit läuft nach dem Update weiter
+                assertEquals(2L, dao.getRunningShift()?.id)
+
+                // Neue, leere Streckentabelle; Strecken lassen sich speichern
+                val tracks = room.trackDao()
+                assertEquals(0, tracks.count())
+                val chunk = de.fernfahrer.fahrtenbuch.data.TrackChunks.build(
+                    0, 1L, 0,
+                    listOf(
+                        de.fernfahrer.fahrtenbuch.domain.geo.TrackPoint.of(48.2, 16.37, 1_000),
+                        de.fernfahrer.fahrtenbuch.domain.geo.TrackPoint.of(48.2004, 16.37, 1_002),
+                    ),
+                    listOf("AT"),
+                )
+                tracks.insert(chunk)
+                assertEquals(1, tracks.count())
+                assertEquals("AT", tracks.getAllChunks().single().countries)
+            }
+            assertEquals(4, room.openHelper.readableDatabase.version)
+        } finally {
+            room.close()
+        }
+    }
+
+    /** Gegenprobe: Ohne die Migration 3 → 4 lässt Room die alte Datenbank nicht öffnen (und löscht nichts). */
+    @Test
+    fun ohneMigration3Auf4SchlaegtDasOeffnenFehl() {
+        createDatabase(dbName, 3) { fillVersion3() }
+        val room = openWithRoom(dbName, arrayOf(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3))
+        try {
+            val error = runCatching { runBlocking { room.dao().getAllDays() } }.exceptionOrNull()
+            assertTrue("Ohne Migration muss das Öffnen fehlschlagen", error is IllegalStateException)
+        } finally {
+            room.close()
+        }
+        // Die alten Einträge sind unverändert vorhanden
+        SQLiteDatabase.openDatabase(context.getDatabasePath(dbName).path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            assertEquals(3, db.version)
+            db.rawQuery("SELECT COUNT(*) FROM days", null).use { c -> c.moveToFirst(); assertEquals(3, c.getInt(0)) }
+        }
+    }
+
+    @Test
+    fun sicherungVorUpdateVonVersion3EnthaeltSchichtenUndTagesfelder() {
+        createDatabase(AppDatabase.DB_NAME, 3) { fillVersion3() }
+        var publicBytes: ByteArray? = null
+        val result = PreMigrationBackup.runIfNeeded(context, AppDatabase.DB_NAME, AppDatabase.VERSION, "Max", null) { _, name, bytes ->
+            publicBytes = bytes
+            name
+        }
+        assertEquals(3, result!!.fromVersion)
+        val restored = Backup.fromJson(String(publicBytes!!))
+        assertEquals(3, restored.days.size)
+        assertEquals(2, restored.shifts.size)
+        assertEquals(1, restored.shifts.count { it.running })
+        assertFalse(restored.days.first { it.id == 2L }.countryManual)
+        assertEquals(true, restored.days.first { it.id == 2L }.overnightOverride)
+        assertTrue(restored.days.first { it.id == 3L }.timesAuto)
+    }
 
     // ---------------------------------------------------------------------------------------------
 
@@ -106,7 +209,7 @@ class MigrationTest {
     }
 
     @Test
-    fun updateVonVersion2Auf3BehaeltAlleEintraege() {
+    fun updateVonVersion2AufAktuellBehaeltAlleEintraege() {
         createDatabase(dbName, 2) { fillVersion2() }
         val room = openWithRoom(dbName)
         try {
@@ -155,14 +258,14 @@ class MigrationTest {
                 assertEquals(330, running.startMinute)
                 assertEquals(1, shifts.count { it.running })
             }
-            assertEquals(3, room.openHelper.readableDatabase.version)
+            assertEquals(AppDatabase.VERSION, room.openHelper.readableDatabase.version)
         } finally {
             room.close()
         }
     }
 
     @Test
-    fun updateVonVersion1Auf3() {
+    fun updateVonVersion1AufAktuell() {
         createDatabase(dbName, 1) {
             execSQL("INSERT INTO tours (id, ended) VALUES (1, 1)")
             execSQL(
@@ -180,7 +283,7 @@ class MigrationTest {
                 assertNull(day.legacyWorkStartMinute)
                 assertTrue(room.dao().getAllShifts().isEmpty())
             }
-            assertEquals(3, room.openHelper.readableDatabase.version)
+            assertEquals(AppDatabase.VERSION, room.openHelper.readableDatabase.version)
         } finally {
             room.close()
         }

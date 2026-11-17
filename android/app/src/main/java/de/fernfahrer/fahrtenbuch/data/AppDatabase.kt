@@ -16,16 +16,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * Vor jeder Migration legt [PreMigrationBackup] eine Sicherungskopie an.
  */
 @Database(
-    entities = [DayEntity::class, TourEntity::class, WorkShiftEntity::class],
+    entities = [DayEntity::class, TourEntity::class, WorkShiftEntity::class, TrackChunkEntity::class],
     version = AppDatabase.VERSION,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): FahrtenbuchDao
+    abstract fun trackDao(): TrackDao
 
     companion object {
-        const val VERSION = 3
+        const val VERSION = 4
         const val DB_NAME = "fahrtenbuch.db"
 
         fun create(context: Context): AppDatabase =
@@ -81,6 +82,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        /**
+         * Version 3 → 4: neue Tabelle `track_chunks` für die GPS-Strecken der Karte.
+         * Bestehende Tabellen bleiben unverändert.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `track_chunks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`trackId` INTEGER NOT NULL, `seq` INTEGER NOT NULL, `startTime` INTEGER NOT NULL, " +
+                        "`endTime` INTEGER NOT NULL, `pointCount` INTEGER NOT NULL, `minLatE5` INTEGER NOT NULL, " +
+                        "`minLonE5` INTEGER NOT NULL, `maxLatE5` INTEGER NOT NULL, `maxLonE5` INTEGER NOT NULL, " +
+                        "`lengthMeters` REAL NOT NULL, `countries` TEXT NOT NULL, `data` BLOB NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_track_chunks_trackId` ON `track_chunks` (`trackId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_track_chunks_startTime` ON `track_chunks` (`startTime`)")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
     }
 }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material3.Icon
@@ -44,12 +45,14 @@ import de.fernfahrer.fahrtenbuch.ui.editor.EditorMode
 import de.fernfahrer.fahrtenbuch.ui.editor.EditorScreen
 import de.fernfahrer.fahrtenbuch.ui.history.HistoryScreen
 import de.fernfahrer.fahrtenbuch.ui.home.HomeScreen
+import de.fernfahrer.fahrtenbuch.ui.map.MapScreen
 import de.fernfahrer.fahrtenbuch.ui.settings.SettingsScreen
 import de.fernfahrer.fahrtenbuch.ui.stats.StatsScreen
 
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     HOME("heute", "Heute", Icons.Rounded.Today),
     HISTORY("verlauf", "Verlauf", Icons.Rounded.History),
+    MAP("karte", "Karte", Icons.Rounded.Map),
     STATS("auswertung", "Auswertung", Icons.Rounded.BarChart),
     SETTINGS("einstellungen", "Einstellungen", Icons.Rounded.Settings),
 }
@@ -132,6 +135,7 @@ fun AppRoot() {
             composable(Tab.HISTORY.route) {
                 HistoryScreen(vm = vm, onOpenDay = { nav.openEditor(it) }, onAdd = { nav.openEditor(fresh = true) })
             }
+            composable(Tab.MAP.route) { MapScreen(mainVm = vm) }
             composable(Tab.STATS.route) { StatsScreen(vm = vm) }
             composable(Tab.SETTINGS.route) { SettingsScreen(vm = vm) }
             composable(

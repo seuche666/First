@@ -16,7 +16,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * Vor jeder Migration legt [PreMigrationBackup] eine Sicherungskopie an.
  */
 @Database(
-    entities = [DayEntity::class, TourEntity::class, WorkShiftEntity::class, TrackChunkEntity::class],
+    entities = [
+        DayEntity::class, TourEntity::class, WorkShiftEntity::class, TrackChunkEntity::class,
+        StopLocationEntity::class, MilestoneEntity::class,
+    ],
     version = AppDatabase.VERSION,
     exportSchema = true,
 )
@@ -24,9 +27,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): FahrtenbuchDao
     abstract fun trackDao(): TrackDao
+    abstract fun stopDao(): StopDao
 
     companion object {
-        const val VERSION = 4
+        const val VERSION = 5
         const val DB_NAME = "fahrtenbuch.db"
 
         fun create(context: Context): AppDatabase =
@@ -100,6 +104,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        /**
+         * Version 4 → 5: neue Tabellen `stop_locations` (Standort beim Arbeitsende, für
+         * Übernachtungsorte) und `milestones`. Bestehende Tabellen bleiben unverändert.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `stop_locations` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`date` TEXT NOT NULL, `minute` INTEGER NOT NULL, `latE5` INTEGER NOT NULL, " +
+                        "`lonE5` INTEGER NOT NULL, `countryCode` TEXT)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_stop_locations_date` ON `stop_locations` (`date`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `milestones` (`id` TEXT NOT NULL, `achievedOn` TEXT NOT NULL, " +
+                        "PRIMARY KEY(`id`))",
+                )
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
     }
 }

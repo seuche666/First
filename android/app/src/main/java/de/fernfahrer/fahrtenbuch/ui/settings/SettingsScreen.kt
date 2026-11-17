@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.automirrored.rounded.Rule
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -66,7 +67,7 @@ import java.time.LocalDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: MainViewModel) {
+fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}) {
     val context = LocalContext.current
     val savedName by vm.driverName.collectAsStateWithLifecycle()
     val pending by vm.pendingRestore.collectAsStateWithLifecycle()
@@ -94,7 +95,17 @@ fun SettingsScreen(vm: MainViewModel) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         contentWindowInsets = WindowInsets(0),
-        topBar = { LargeTopAppBar(title = { Text("Einstellungen") }, scrollBehavior = scroll) },
+        topBar = {
+            LargeTopAppBar(
+                title = { Text("Einstellungen") },
+                navigationIcon = {
+                    androidx.compose.material3.IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Zurück")
+                    }
+                },
+                scrollBehavior = scroll,
+            )
+        },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -374,7 +385,7 @@ private fun MapSettingsCard(
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            "Kartendaten © OpenStreetMap-Mitwirkende. Die Kartenbilder werden bei Bedarf aus dem Internet " +
+            "Kartendaten © OpenStreetMap-Mitwirkende. Ortsnamen: GeoNames (CC BY 4.0), offline in der App. Die Kartenbilder werden bei Bedarf aus dem Internet " +
                 "geladen und zwischengespeichert; dabei wird nur der angezeigte Kartenausschnitt abgefragt, " +
                 "nie deine Strecken.",
             style = MaterialTheme.typography.bodySmall,

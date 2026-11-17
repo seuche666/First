@@ -334,6 +334,15 @@ class Repository(
     // Datensicherung
     // ---------------------------------------------------------------------------------------------
 
+    // ---------- Standorte beim Arbeitsende, Meilensteine ----------
+
+    val stops: Flow<List<StopLocationEntity>> = db.stopDao().observeStops()
+    suspend fun addStop(stop: StopLocationEntity): Long = db.stopDao().insertStop(stop)
+
+    val milestones: Flow<List<MilestoneEntity>> = db.stopDao().observeMilestones()
+    suspend fun getMilestones(): List<MilestoneEntity> = db.stopDao().getAllMilestones()
+    suspend fun addMilestones(list: List<MilestoneEntity>) = db.stopDao().insertMilestones(list)
+
     suspend fun exportData(): BackupData = BackupData(
         dao.getAllTours(), dao.getAllDays(), shifts = dao.getAllShifts(), tracks = db.trackDao().getAllChunks(),
         stops = db.stopDao().getAllStops(), milestones = db.stopDao().getAllMilestones(),

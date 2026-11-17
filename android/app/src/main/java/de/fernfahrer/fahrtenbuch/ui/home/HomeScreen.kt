@@ -106,13 +106,12 @@ fun HomeScreen(vm: MainViewModel, onOpenEditor: (id: Long, mode: EditorMode) -> 
     )
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column(Modifier.padding(start = 4.dp, top = 12.dp, bottom = 4.dp)) {
-                Text("Fahrtenbuch", style = MaterialTheme.typography.headlineLarge)
+            Column(Modifier.padding(start = 4.dp)) {
                 Text(
                     Format.longDate(today),
                     style = MaterialTheme.typography.titleMedium,

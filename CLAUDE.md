@@ -19,25 +19,32 @@ kein Login. Berechnet keine Steuerbeträge.
 
 ## Aufbau der App (`android/app/src/main/java/de/fernfahrer/fahrtenbuch/`)
 
-- `data/` – Room-Datenbank (`AppDatabase`, Version **4**), Tabellen `days`, `tours`, `work_shifts`,
-  `track_chunks` (GPS-Strecken, Punkte kompakt als BLOB; `TrackRepository`, `TrackChunks`);
+- `data/` – Room-Datenbank (`AppDatabase`, Version **5**), Tabellen `days`, `tours`, `work_shifts`,
+  `track_chunks` (GPS-Strecken, Punkte kompakt als BLOB; `TrackRepository`, `TrackChunks`),
+  `stop_locations` (Standort bei „Arbeit beenden“ → Übernachtungsorte), `milestones` (`StopDao`);
   `Repository` (gesamte Speicherlogik: Touren, Arbeitsschichten, km-Übernahme, Tour beenden);
-  `Backup` (JSON-Datensicherung, Format **4** mit Strecken, liest 1–3); `PreMigrationBackup` (Sicherung vor
+  `Backup` (JSON-Datensicherung, Format **5** mit Strecken, Orten, Meilensteinen, liest 1–4); `PreMigrationBackup` (Sicherung vor
   jeder Migration); `Settings` (SharedPreferences)
 - `domain/` – reine Logik ohne Android: `Classifier` (voll/halb/Firmenregel/Übernachtung),
   `WorkSplitter` (Schichten an Mitternacht teilen, km anteilig verteilen), `Stats`, `Period`,
   `Countries`, `Format`; `domain/geo/`: `TrackFilter` (Punkte alle 30–50 m, ungenaue/Ausreißer verwerfen),
-  `TrackCodec` (Delta-Varint), `Simplify`, `FogGeometry` (Detailstufen + Gruppen), `CoverageRaster` (km²)
+  `TrackCodec` (Delta-Varint), `Simplify`, `FogGeometry` (Detailstufen + Gruppen), `Overnights`
+  (Übernachtungsplätze, Zusammenfassen im Umkreis 200 m); `Milestones` (Berechnung mit Datum),
+  `MilestoneTracker` (erstes Mal und nach Wiederherstellen still freischalten)
 - `export/` – PDF (`PdfExporter`, Android `PdfDocument`) und CSV (Excel, Semikolon, BOM), Teilen
 - `location/` – `CountryLocator` (Offline-Ländererkennung aus `assets/country_borders.bin`,
-  Natural Earth 1:10m, erzeugt mit `android/tools/build_country_borders.py`), `LocationProvider`
+  Natural Earth 1:10m, erzeugt mit `android/tools/build_country_borders.py`), `PlaceLocator` (nächster Ort
+  offline aus `assets/places.bin`, GeoNames cities1000, erzeugt mit `android/tools/build_places.py`), `LocationProvider`
   (einzelne GPS-Abfrage, kein Dauer-GPS)
 - `work/` – `WorkController` (Arbeit beginnen/beenden, Tour beenden, GPS-Land, Erinnerung, Aufzeichnung),
   `TrackingService` (Vordergrunddienst Typ location, Plattform-GPS), `TrackRecorder`, `Tracking` (Start/Stopp,
-  Berechtigungen, Akku-Optimierung),
+  Berechtigungen, Akku-Optimierung), `StopLocator` (Position beim Arbeitsende),
   `ReminderScheduler`/`ReminderReceiver` (Erinnerung nach 15 Std.), `BootReceiver`
-- `ui/` – Compose-Bildschirme: `home` (Start), `history` (Verlauf), `map` (Fog-of-War-Karte mit osmdroid,
-  `FogRenderer`/`FogOverlay`, `MapViewModel`, `MapConfig` mit User-Agent/Cache), `stats` (Auswertung),
+- `ui/` – `AppRoot`: Kopfzeile mit Titel + Zahnrad (Einstellungen) und Kacheln „Fahrtenbuch“/„Karte“
+  (letzte Ansicht in `Settings.lastViewMap`); untere Leiste nur im Fahrtenbuch (Heute, Verlauf, Auswertung).
+  Bildschirme: `home` (Start), `history` (Verlauf), `map` (Fog-of-War-Karte mit osmdroid,
+  `FogRenderer`/`FogOverlay`, `MapIcons` (LKW, Mond), `MilestonesUi` (Übersicht, Meldung mit Animation,
+  Übernachtungs-Dialog), `MapViewModel`, `MapConfig` mit User-Agent/Cache), `stats` (Auswertung),
   `settings`, `editor` (Tag bearbeiten, Schicht-Dialog), `components` (km-Dialog,
   Berechtigungs-Erklärung, Länderauswahl …), `MainViewModel`, `AppRoot` (Navigation)
 
@@ -82,6 +89,9 @@ Hinweise für die Cloud-Umgebung:
   sich unter Robolectric nicht testen.
 
 ## Zuletzt geändert
+
+- **Umschalter Fahrtenbuch/Karte, LKW-Symbol, Übernachtungsplätze, Meilensteine (DB v5, Backup 5):**
+  Einstellungen über Zahnrad, km²-Kachel entfernt (Statistik: km laut GPS, Länder), Ortsnamen offline.
 
 - **Fog-of-War-Karte (DB v4, Backup-Format 4):** Reiter „Karte“ (osmdroid + OSM-Kacheln), Nebel mit weichem
   Rand, Korridor 100 m/500 m/1 km/5 km, Aufzeichnung als Vordergrunddienst während der Arbeitszeit,

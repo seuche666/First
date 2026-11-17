@@ -42,6 +42,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.BedtimeOff
+import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import android.graphics.drawable.BitmapDrawable
+import de.fernfahrer.fahrtenbuch.domain.geo.Overnights
+import org.osmdroid.views.overlay.FolderOverlay
+import org.osmdroid.views.overlay.Marker
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -73,7 +85,6 @@ import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
-import java.util.Locale
 
 /** Europa (für den Knopf „Europa“ und als Startansicht ohne Strecken). */
 private val EUROPE = BoundingBox(71.0, 40.0, 35.0, -10.0)
@@ -89,6 +100,10 @@ fun MapScreen(mainVm: MainViewModel) {
     val recording by TrackingService.running.collectAsStateWithLifecycle()
     val dismissed by vm.dismissedHints.collectAsStateWithLifecycle()
     val permissions = rememberTrackingPermissions(onChanged = mainVm::syncTracking)
+    val overnights by vm.overnights.collectAsStateWithLifecycle()
+    val milestones by mainVm.milestones.collectAsStateWithLifecycle()
+    var selectedCluster by remember { mutableStateOf<Overnights.Cluster?>(null) }
+    var showMilestones by remember { mutableStateOf(false) }
 
     val hint: MapHint? = when {
         !mapSettings.trackingEnabled -> MapHint("aus", Icons.Rounded.Route, TrackingTexts.TRACKING_OFF, "Einschalten") {
@@ -110,10 +125,20 @@ fun MapScreen(mainVm: MainViewModel) {
                 hasLocation = permissions.location,
                 onNeedLocation = permissions.requestLocation,
                 onMessage = mainVm::showMessage,
+                overnights = if (mapSettings.showOvernights) overnights else emptyList(),
+                showOvernights = mapSettings.showOvernights,
+                onToggleOvernights = {
+                    val on = !mapSettings.showOvernights
+                    mainVm.setMapSettings(mapSettings.copy(showOvernights = on))
+                    mainVm.showMessage(if (on) "Übernachtungsplätze eingeblendet" else "Übernachtungsplätze ausgeblendet")
+                },
+                onClusterClick = { selectedCluster = it },
+                onOpenMilestones = { showMilestones = true },
+                achievedMilestones = milestones.count { it.achieved },
             )
 
             Column(
-                Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.statusBars).padding(12.dp),
+                Modifier.align(Alignment.TopCenter).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -131,6 +156,9 @@ fun MapScreen(mainVm: MainViewModel) {
         }
         MapStatsCard(stats)
     }
+
+    selectedCluster?.let { OvernightDialog(it, onDismiss = { selectedCluster = null }) }
+    if (showMilestones) MilestonesSheet(milestones, onDismiss = { showMilestones = false })
 }
 
 private class MapHint(
@@ -150,6 +178,12 @@ private fun FogMap(
     hasLocation: Boolean,
     onNeedLocation: () -> Unit,
     onMessage: (String) -> Unit,
+    overnights: List<Overnights.Cluster>,
+    showOvernights: Boolean,
+    onToggleOvernights: () -> Unit,
+    onClusterClick: (Overnights.Cluster) -> Unit,
+    onOpenMilestones: () -> Unit,
+    achievedMilestones: Int,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -169,11 +203,38 @@ private fun FogMap(
             overlays.add(fog)
         }
     }
+    // Übernachtungsplätze über dem Nebel, darunter nichts verdeckt
+    val nightLayer = remember { FolderOverlay().also { mapView.overlays.add(it) } }
+    val clickHandler = rememberUpdatedState(onClusterClick)
     val myLocation = remember {
         MyLocationNewOverlay(GpsMyLocationProvider(context), mapView).apply {
             isDrawAccuracyEnabled = true
+            // Eigenes LKW-Symbol statt Männchen; in Fahrt dreht es sich in Fahrtrichtung
+            val truck = MapIcons.truck(density)
+            setPersonIcon(truck)
+            setDirectionIcon(truck)
+            setPersonAnchor(0.5f, 0.5f)
+            setDirectionAnchor(0.5f, 0.5f)
             mapView.overlays.add(this)
         }
+    }
+    LaunchedEffect(overnights) {
+        nightLayer.items.clear()
+        for (cluster in overnights) {
+            nightLayer.add(
+                Marker(mapView).apply {
+                    position = GeoPoint(cluster.lat, cluster.lon)
+                    icon = BitmapDrawable(context.resources, MapIcons.overnight(density, cluster.count))
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setInfoWindow(null)
+                    setOnMarkerClickListener { _, _ ->
+                        clickHandler.value(cluster)
+                        true
+                    }
+                },
+            )
+        }
+        mapView.invalidate()
     }
 
     // Startansicht: zuletzt gesehener Ausschnitt, sonst alle Strecken, sonst Europa
@@ -245,6 +306,20 @@ private fun FogMap(
             Modifier.align(Alignment.BottomEnd).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            SmallFloatingActionButton(onClick = onOpenMilestones) {
+                BadgedBox(badge = { if (achievedMilestones > 0) Badge { Text(achievedMilestones.toString()) } }) {
+                    Icon(Icons.Rounded.EmojiEvents, contentDescription = "Meilensteine")
+                }
+            }
+            SmallFloatingActionButton(
+                onClick = onToggleOvernights,
+                containerColor = if (showOvernights) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Icon(
+                    if (showOvernights) Icons.Rounded.Bedtime else Icons.Rounded.BedtimeOff,
+                    contentDescription = if (showOvernights) "Übernachtungsplätze ausblenden" else "Übernachtungsplätze einblenden",
+                )
+            }
             SmallFloatingActionButton(onClick = { mapView.zoomToBoundingBox(EUROPE, true) }) {
                 Icon(Icons.Rounded.Public, contentDescription = "Ganz Europa zeigen")
             }
@@ -330,8 +405,8 @@ private fun MapStatsCard(stats: MapStats) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             StatRow {
                 StatTile(
-                    value = stats.areaKm2?.let(::formatArea) ?: "…",
-                    label = "km² aufgedeckt",
+                    value = Format.number(Math.round(stats.distanceKm).toInt()),
+                    label = "km laut GPS",
                     modifier = Modifier.weight(1f),
                     container = MaterialTheme.colorScheme.primaryContainer,
                     content = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -339,11 +414,6 @@ private fun MapStatsCard(stats: MapStats) {
                 StatTile(
                     value = stats.countries.size.toString(),
                     label = if (stats.countries.size == 1) "Land befahren" else "Länder befahren",
-                    modifier = Modifier.weight(1f),
-                )
-                StatTile(
-                    value = Format.number(Math.round(stats.distanceKm).toInt()),
-                    label = "km laut GPS",
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -359,9 +429,4 @@ private fun MapStatsCard(stats: MapStats) {
             }
         }
     }
-}
-
-private fun formatArea(km2: Double): String = when {
-    km2 < 10 -> String.format(Locale.GERMANY, "%.1f", km2)
-    else -> Format.number(Math.round(km2).toInt())
 }

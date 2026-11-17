@@ -129,6 +129,8 @@ data class TrackChunkMeta(
     val id: Long,
     val trackId: Long,
     val seq: Int,
+    /** Zeit des ersten Punkts (Sekunden seit 1970, UTC). */
+    val startTime: Long,
     val pointCount: Int,
     val lengthMeters: Double,
     val countries: String,

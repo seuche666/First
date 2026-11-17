@@ -158,6 +158,40 @@ class BackupAndCsvTest {
         assertTrue(org.json.JSONObject(json).getJSONArray("tracks").getJSONObject(0).getString("points").length < 300 * 10)
     }
 
+    @Test
+    fun sicherungMitUebernachtungsortenUndMeilensteinen() {
+        val withStops = data.copy(
+            stops = listOf(
+                de.fernfahrer.fahrtenbuch.data.StopLocationEntity(3, mo, 1260, 4_579_000, 465_000, "FR"),
+                de.fernfahrer.fahrtenbuch.data.StopLocationEntity(4, mo.plusDays(1), 900, 5_000_000, 800_000, null),
+            ),
+            milestones = listOf(de.fernfahrer.fahrtenbuch.data.MilestoneEntity("land_FR", mo)),
+            mapSettings = de.fernfahrer.fahrtenbuch.data.MapSettings(showOvernights = false),
+        )
+        val restored = Backup.fromJson(Backup.toJson(withStops))
+        assertEquals(withStops.stops, restored.stops)
+        assertEquals(withStops.milestones, restored.milestones)
+        assertEquals(false, restored.mapSettings?.showOvernights)
+        assertEquals(5, org.json.JSONObject(Backup.toJson(withStops)).getInt("version"))
+    }
+
+    /** Sicherung aus App-Version 1.0.10 (Format 4): ohne Standorte/Meilensteine – vorhandene bleiben erhalten. */
+    @Test
+    fun alteSicherungVersion4WirdGeladen() {
+        val v4 = org.json.JSONObject(Backup.toJson(data)).apply {
+            put("version", 4)
+            remove("stops")
+            remove("milestones")
+            put("mapSettings", org.json.JSONObject().put("trackingEnabled", true).put("corridorMeters", 500))
+        }.toString()
+        val restored = Backup.fromJson(v4)
+        assertEquals(data.days, restored.days)
+        assertNull(restored.stops)
+        assertNull(restored.milestones)
+        assertEquals(500, restored.mapSettings?.corridorMeters)
+        assertEquals(true, restored.mapSettings?.showOvernights)
+    }
+
     @Test(expected = BackupFormatException::class)
     fun beschaedigteStreckeWirdAbgelehnt() {
         val json = org.json.JSONObject(Backup.toJson(data)).apply {

@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 /** Zugriff auf die aufgezeichneten GPS-Strecken. */
 @Dao
 interface TrackDao {
-    @Query("SELECT id, trackId, seq, pointCount, lengthMeters, countries FROM track_chunks ORDER BY trackId, seq")
+    @Query("SELECT id, trackId, seq, startTime, pointCount, lengthMeters, countries FROM track_chunks ORDER BY trackId, seq")
     fun observeMeta(): Flow<List<TrackChunkMeta>>
 
     @Query("SELECT * FROM track_chunks WHERE id IN (:ids)")
@@ -17,6 +17,9 @@ interface TrackDao {
 
     @Query("SELECT * FROM track_chunks ORDER BY trackId, seq")
     suspend fun getAllChunks(): List<TrackChunkEntity>
+
+    @Query("SELECT * FROM track_chunks ORDER BY endTime DESC LIMIT 1")
+    suspend fun getLatestChunk(): TrackChunkEntity?
 
     @Query("SELECT COUNT(*) FROM track_chunks")
     suspend fun count(): Int

@@ -13,6 +13,15 @@ import de.fernfahrer.fahrtenbuch.data.BackupData
 import de.fernfahrer.fahrtenbuch.data.BackupFormatException
 import de.fernfahrer.fahrtenbuch.data.EndTourResult
 import de.fernfahrer.fahrtenbuch.data.MapSettings
+import de.fernfahrer.fahrtenbuch.domain.MilestoneTracker
+import de.fernfahrer.fahrtenbuch.data.TrackChunkMeta
+import de.fernfahrer.fahrtenbuch.domain.Countries
+import de.fernfahrer.fahrtenbuch.domain.Milestones
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import java.time.Instant
+import java.time.ZoneId
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
 import de.fernfahrer.fahrtenbuch.data.StartResult
@@ -77,6 +86,7 @@ data class KmPrompt(
     enum class Kind { END_WORK, END_TOUR }
 }
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class MainViewModel(
     private val repo: Repository,
     private val settings: Settings,
@@ -165,6 +175,13 @@ class MainViewModel(
         }
     }
 
+    /** Zuletzt geöffnete Ansicht (Karte oder Fahrtenbuch), bleibt nach dem Schließen der App erhalten. */
+    var lastViewMap: Boolean
+        get() = settings.lastViewMap
+        set(value) {
+            settings.lastViewMap = value
+        }
+
     /** Wurde „Standort immer erlauben“ schon erklärt? */
     val backgroundLocationExplained: Boolean get() = settings.backgroundLocationExplained
     fun markBackgroundLocationExplained() {
@@ -182,6 +199,53 @@ class MainViewModel(
 
     fun showMessage(text: String) {
         _messages.tryEmit(text)
+    }
+
+    // ---------- Meilensteine ----------
+
+    private val trackMeta = app?.tracks?.meta ?: flowOf(emptyList())
+
+    /** Aus den Daten berechneter Stand aller Meilensteine. */
+    private val evaluated: StateFlow<List<Milestones.Status>?> =
+        combine(repo.classifiedDays, trackMeta) { days, meta -> Milestones.evaluate(milestoneInput(days, meta), Countries::label) }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Für die Übersicht: gespeicherte Meilensteine bleiben erreicht, auch wenn Daten gelöscht wurden. */
+    val milestones: StateFlow<List<Milestones.Status>> =
+        combine(evaluated.filterNotNull(), repo.milestones) { list, stored ->
+            val dates = stored.associate { it.id to it.achievedOn }
+            list.map { st -> dates[st.id]?.let { st.copy(achievedOn = it) } ?: st }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _celebrations = MutableStateFlow<List<Milestones.Status>>(emptyList())
+
+    /** Gerade anzuzeigende Meldung „Meilenstein erreicht“ (eine nach der anderen). */
+    val celebration: StateFlow<Milestones.Status?> = _celebrations.map { it.firstOrNull() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun dismissCelebration() {
+        _celebrations.value = _celebrations.value.drop(1)
+    }
+
+    private val milestoneTracker = MilestoneTracker(
+        stored = repo::getMilestones,
+        store = repo::addMilestones,
+        isInitialized = { settings.milestonesInitialized },
+        setInitialized = { settings.milestonesInitialized = true },
+    )
+
+    init {
+        viewModelScope.launch {
+            evaluated.filterNotNull().debounce(800).collect { list ->
+                try {
+                    val show = milestoneTracker.check(list)
+                    if (show.isNotEmpty()) _celebrations.value = _celebrations.value + show
+                } catch (e: Exception) {
+                    android.util.Log.w("MainViewModel", "Meilensteine nicht geprüft", e)
+                }
+            }
+        }
     }
 
     init {
@@ -400,6 +464,7 @@ class MainViewModel(
         _pendingRestore.value = null
         viewModelScope.launch {
             try {
+                milestoneTracker.silenceNext()
                 repo.replaceAll(data)
                 if (data.driverName.isNotBlank()) settings.setDriverName(data.driverName)
                 data.rules?.let { settings.setShortSingleDayAsHalf(it.shortSingleDayAsHalf) }
@@ -419,6 +484,26 @@ class MainViewModel(
     }
 
     companion object {
+        /** Eingabe für die Meilensteine aus Tagen und GPS-Strecken. */
+        fun milestoneInput(days: List<ClassifiedDay>, meta: List<TrackChunkMeta>, zone: ZoneId = ZoneId.systemDefault()): Milestones.Input {
+            fun dateOf(sec: Long) = Instant.ofEpochSecond(sec).atZone(zone).toLocalDate()
+            val countries = HashMap<String, LocalDate>()
+            fun seen(code: String, d: LocalDate) {
+                if (code.isBlank()) return
+                val prev = countries[code]
+                if (prev == null || d < prev) countries[code] = d
+            }
+            meta.forEach { m -> m.countries.split(',').forEach { seen(it, dateOf(m.startTime)) } }
+            days.forEach { seen(it.day.countryCode, it.day.date) }
+            return Milestones.Input(
+                gpsDistances = meta.map { dateOf(it.startTime) to it.lengthMeters },
+                countriesFirstSeen = countries,
+                overnightDates = days.filter { it.overnight }.map { it.day.date },
+                tours = days.filter { it.day.tourId != null }.groupBy { it.day.tourId }.values
+                    .map { list -> list.minOf { it.day.date } to list.maxOf { it.day.date } },
+            )
+        }
+
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as FahrtenbuchApp

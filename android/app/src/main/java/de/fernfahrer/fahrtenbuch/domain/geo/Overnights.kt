@@ -1,8 +1,14 @@
 package de.fernfahrer.fahrtenbuch.domain.geo
 
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
-/** Übernachtungsplätze für die Karte: Position je Übernachtung, zu Stammplätzen zusammengefasst. */
+/**
+ * Berechnung der Übernachtungsplätze bis Datenbank-Version 5 (Position je Übernachtungstag, zu
+ * Stammplätzen zusammengefasst). Seit Version 6 werden Plätze nur noch beim „Arbeit beenden“ mit
+ * Haken fest gespeichert; diese Berechnung dient nur noch der einmaligen Übernahme der alten Plätze.
+ */
 object Overnights {
     /** Eine Übernachtung mit Position (Grad × 100 000). */
     data class Spot(
@@ -59,5 +65,26 @@ object Overnights {
             }
         }
         return groups.indices.map { Cluster(centers[it][0], centers[it][1], groups[it].toList()) }
+    }
+
+    /** Letzter Punkt je Kalendertag einer dekodierten Strecke (Zeitzone [zone]). */
+    fun lastPointPerDay(d: TrackCodec.Decoded, zone: ZoneId): Map<LocalDate, Spot> {
+        val out = HashMap<LocalDate, Spot>()
+        for (i in 0 until d.size) {
+            val date = Instant.ofEpochSecond(d.timeSec[i]).atZone(zone).toLocalDate()
+            val prev = out[date]
+            if (prev == null || prev.timeKey <= d.timeSec[i]) out[date] = Spot(date, d.latE5[i], d.lonE5[i], null, d.timeSec[i])
+        }
+        return out
+    }
+
+    /** Fasst die letzten Punkte je Tag mehrerer Strecken zusammen (jeweils der späteste). */
+    fun mergeDayEnds(parts: Iterable<Map<LocalDate, Spot>>): Map<LocalDate, Spot> {
+        val merged = HashMap<LocalDate, Spot>()
+        for (m in parts) for ((date, spot) in m) {
+            val prev = merged[date]
+            if (prev == null || spot.timeKey > prev.timeKey) merged[date] = spot
+        }
+        return merged
     }
 }

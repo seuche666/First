@@ -17,11 +17,13 @@ import org.json.JSONObject
  *      geschätzte km, Einstellungen zur Arbeitszeit
  * - 4: GPS-Strecken der Karte (Punkte kompakt als Base64) und Einstellungen der Karte
  * - 5: Standorte beim Arbeitsende (Übernachtungsorte) und erreichte Meilensteine
+ * - 6: mehrere Länder pro Tag, Übernachtungsplätze mit Namen, Notizen und einzelnen Übernachtungen,
+ *      Dieselverbrauch, Einstellungen des automatischen Backups
  * Ältere Sicherungen werden weiterhin gelesen; fehlende Felder erhalten sinnvolle Werte.
  */
 object Backup {
     private const val APP_ID = "fahrtenbuch-android"
-    const val VERSION = 5
+    const val VERSION = 6
 
     fun toJson(data: BackupData): String {
         val root = JSONObject()
@@ -43,7 +45,7 @@ object Backup {
             root.put(
                 "mapSettings",
                 JSONObject().put("trackingEnabled", it.trackingEnabled).put("corridorMeters", it.corridorMeters)
-                    .put("showOvernights", it.showOvernights),
+                    .put("showOvernights", it.showOvernights).put("fuelPer100Km", it.fuelPer100Km),
             )
         }
         root.put("tours", JSONArray().apply {
@@ -69,7 +71,8 @@ object Backup {
                         .put("countryManual", d.countryManual)
                         .put("overnightOverride", d.overnightOverride.orNull())
                         .put("kmInterpolated", d.kmInterpolated)
-                        .put("timesAuto", d.timesAuto),
+                        .put("timesAuto", d.timesAuto)
+                        .put("countries", d.countries),
                 )
             }
         })
@@ -122,6 +125,45 @@ object Backup {
                 list.forEach { put(JSONObject().put("id", it.id).put("achievedOn", it.achievedOn.toString())) }
             })
         }
+        data.places?.let { places ->
+            root.put("overnightPlaces", JSONArray().apply {
+                places.forEach { (p, stays) ->
+                    put(
+                        JSONObject()
+                            .put("id", p.id)
+                            .put("latE5", p.latE5)
+                            .put("lonE5", p.lonE5)
+                            .put("countryCode", p.countryCode.orNull())
+                            .put("name", p.name)
+                            .put("rating", p.rating)
+                            .put("shower", p.shower)
+                            .put("toilet", p.toilet)
+                            .put("food", p.food)
+                            .put("secure", p.secure)
+                            .put("quiet", p.quiet)
+                            .put("note", p.note)
+                            .put("stays", JSONArray().apply {
+                                stays.forEach { st ->
+                                    put(
+                                        JSONObject()
+                                            .put("id", st.id)
+                                            .put("date", st.date.toString())
+                                            .put("minute", st.minute)
+                                            .put("latE5", st.latE5)
+                                            .put("lonE5", st.lonE5),
+                                    )
+                                }
+                            }),
+                    )
+                }
+            })
+        }
+        data.autoBackup?.let {
+            root.put(
+                "autoBackup",
+                JSONObject().put("enabled", it.enabled).put("interval", it.interval.name).put("keep", it.keep),
+            )
+        }
         return root.toString(2)
     }
 
@@ -169,6 +211,8 @@ object Backup {
                     overnightOverride = d.optBooleanOrNull("overnightOverride"),
                     kmInterpolated = d.optBoolean("kmInterpolated", false),
                     timesAuto = d.optBoolean("timesAuto", false),
+                    // Ab Format 6; ältere Sicherungen: nur ein Land pro Tag.
+                    countries = d.optString("countries", ""),
                 )
             }
             if (days.map { it.date }.toSet().size != days.size) {
@@ -210,6 +254,7 @@ object Backup {
                     trackingEnabled = it.optBoolean("trackingEnabled", true),
                     corridorMeters = MapSettings.validCorridor(it.optInt("corridorMeters", MapSettings.DEFAULT_CORRIDOR)),
                     showOvernights = it.optBoolean("showOvernights", true),
+                    fuelPer100Km = MapSettings.validFuel(it.optDouble("fuelPer100Km", MapSettings.DEFAULT_FUEL)),
                 )
             }
             val tracks = root.optJSONArray("tracks")?.let { arr ->
@@ -248,9 +293,49 @@ object Backup {
                     MilestoneEntity(m.getString("id"), LocalDate.parse(m.getString("achievedOn")))
                 }
             }
+            val places = root.optJSONArray("overnightPlaces")?.let { arr ->
+                (0 until arr.length()).map { i ->
+                    val p = arr.getJSONObject(i)
+                    val place = OvernightPlaceEntity(
+                        id = p.getLong("id"),
+                        latE5 = p.getInt("latE5").also { require(it in -9_000_000..9_000_000) },
+                        lonE5 = p.getInt("lonE5").also { require(it in -18_000_000..18_000_000) },
+                        countryCode = p.optStringOrNull("countryCode"),
+                        name = p.optString("name", ""),
+                        rating = p.optInt("rating", 0).coerceIn(0, 5),
+                        shower = p.optBoolean("shower", false),
+                        toilet = p.optBoolean("toilet", false),
+                        food = p.optBoolean("food", false),
+                        secure = p.optBoolean("secure", false),
+                        quiet = p.optBoolean("quiet", false),
+                        note = p.optString("note", ""),
+                    )
+                    val staysJson = p.optJSONArray("stays") ?: JSONArray()
+                    val stays = (0 until staysJson.length()).map { j ->
+                        val st = staysJson.getJSONObject(j)
+                        OvernightStayEntity(
+                            id = st.getLong("id"),
+                            placeId = place.id,
+                            date = LocalDate.parse(st.getString("date")),
+                            minute = st.optInt("minute", 0).coerceIn(0, 1440),
+                            latE5 = st.optInt("latE5", place.latE5),
+                            lonE5 = st.optInt("lonE5", place.lonE5),
+                        )
+                    }
+                    OvernightPlace(place, stays)
+                }
+            }
+            val autoBackup = root.optJSONObject("autoBackup")?.let {
+                AutoBackupSettings(
+                    enabled = it.optBoolean("enabled", false),
+                    interval = AutoBackupSettings.Interval.entries.firstOrNull { v -> v.name == it.optString("interval") }
+                        ?: AutoBackupSettings.Interval.WEEKLY,
+                    keep = AutoBackupSettings.validKeep(it.optInt("keep", AutoBackupSettings.DEFAULT_KEEP)),
+                )
+            }
             return BackupData(
                 tours, days, root.optString("driverName", ""), rules, shifts, workSettings, tracks, mapSettings,
-                stops, milestones,
+                stops, milestones, places, autoBackup,
             )
         } catch (e: BackupFormatException) {
             throw e

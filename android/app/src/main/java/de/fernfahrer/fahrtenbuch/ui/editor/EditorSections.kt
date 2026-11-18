@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Hotel
@@ -26,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
@@ -129,32 +131,59 @@ internal fun WorkSection(s: EditorState, vm: EditorViewModel) {
     }
 }
 
-/** Land des Tages. */
+/**
+ * Länder des Tages. Mehrere Länder an einem Tag sind möglich (von Hand oder per GPS beim
+ * Grenzübertritt); gezählt wird der Tag für das zuletzt besuchte ausländische Land.
+ */
 @Composable
-internal fun CountrySection(s: EditorState, onPickCountry: () -> Unit) {
-    FieldCard(icon = Icons.Rounded.Public, title = "Land") {
-        Surface(
-            onClick = onPickCountry,
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(Countries.flag(s.countryCode), fontSize = 30.sp)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(Countries.name(s.countryCode), style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (s.countryManual) "Von Hand gewählt · tippen zum Ändern" else "Vorschlag (GPS/Vortag) · tippen zum Ändern",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+internal fun CountrySection(s: EditorState, onPickCountry: (index: Int?) -> Unit, onRemove: (String) -> Unit) {
+    val shown = s.shownCountries
+    FieldCard(icon = Icons.Rounded.Public, title = if (shown.size > 1) "Länder" else "Land") {
+        shown.forEachIndexed { index, code ->
+            if (index > 0) Spacer(Modifier.height(8.dp))
+            Surface(
+                onClick = { onPickCountry(index) },
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(Countries.flag(code), fontSize = 30.sp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(Countries.name(code), style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            when {
+                                shown.size > 1 && code == s.countryCode -> "Zählt für diesen Tag · tippen zum Ändern"
+                                shown.size > 1 -> "Tippen zum Ändern"
+                                s.countryManual -> "Von Hand gewählt · tippen zum Ändern"
+                                else -> "Automatisch (GPS/Vortag) · tippen zum Ändern"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (shown.size > 1) {
+                        IconButton(onClick = { onRemove(code) }) {
+                            Icon(Icons.Rounded.Close, "${Countries.name(code)} entfernen")
+                        }
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        TextButton(onClick = { onPickCountry(null) }) {
+            Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Weiteres Land")
+        }
         Text(
-            "Maßgeblich ist meist das Land, in dem du vor 24 Uhr zuletzt warst.",
+            if (shown.size > 1) {
+                "An diesem Tag warst du in mehreren Ländern. Gezählt wird der Tag für " +
+                    "${Countries.label(s.countryCode)} (das Ausland hat Vorrang)."
+            } else {
+                "Bei Grenzübertritten während der Arbeitszeit ergänzt die App das Land automatisch per GPS " +
+                    "(nicht, wenn du es hier von Hand änderst)."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -56,6 +56,7 @@ class Settings(context: Context) {
             trackingEnabled = prefs.getBoolean(KEY_TRACKING, true),
             showOvernights = prefs.getBoolean(KEY_SHOW_OVERNIGHTS, true),
             corridorMeters = MapSettings.validCorridor(prefs.getInt(KEY_CORRIDOR, MapSettings.DEFAULT_CORRIDOR)),
+            fuelPer100Km = MapSettings.validFuel(prefs.getFloat(KEY_FUEL, MapSettings.DEFAULT_FUEL.toFloat()).toDouble()),
         ),
     )
 
@@ -63,11 +64,62 @@ class Settings(context: Context) {
     val map: StateFlow<MapSettings> = _map.asStateFlow()
 
     fun setMapSettings(value: MapSettings) {
-        val v = value.copy(corridorMeters = MapSettings.validCorridor(value.corridorMeters))
+        val v = value.copy(
+            corridorMeters = MapSettings.validCorridor(value.corridorMeters),
+            fuelPer100Km = MapSettings.validFuel(value.fuelPer100Km),
+        )
         _map.value = v
         prefs.edit().putBoolean(KEY_TRACKING, v.trackingEnabled).putInt(KEY_CORRIDOR, v.corridorMeters)
-            .putBoolean(KEY_SHOW_OVERNIGHTS, v.showOvernights).apply()
+            .putBoolean(KEY_SHOW_OVERNIGHTS, v.showOvernights).putFloat(KEY_FUEL, v.fuelPer100Km.toFloat()).apply()
     }
+
+    private val _autoBackup = MutableStateFlow(
+        AutoBackupSettings(
+            enabled = prefs.getBoolean(KEY_AUTO_BACKUP, false),
+            interval = AutoBackupSettings.Interval.entries
+                .firstOrNull { it.name == prefs.getString(KEY_AUTO_BACKUP_INTERVAL, null) }
+                ?: AutoBackupSettings.Interval.WEEKLY,
+            keep = AutoBackupSettings.validKeep(prefs.getInt(KEY_AUTO_BACKUP_KEEP, AutoBackupSettings.DEFAULT_KEEP)),
+        ),
+    )
+
+    /** Automatisches Backup (an/aus, Abstand, Anzahl). */
+    val autoBackup: StateFlow<AutoBackupSettings> = _autoBackup.asStateFlow()
+
+    fun setAutoBackup(value: AutoBackupSettings) {
+        val v = value.copy(keep = AutoBackupSettings.validKeep(value.keep))
+        _autoBackup.value = v
+        prefs.edit().putBoolean(KEY_AUTO_BACKUP, v.enabled).putString(KEY_AUTO_BACKUP_INTERVAL, v.interval.name)
+            .putInt(KEY_AUTO_BACKUP_KEEP, v.keep).apply()
+    }
+
+    private val _backupFolder = MutableStateFlow(prefs.getString(KEY_AUTO_BACKUP_FOLDER, null))
+
+    /** Vom Nutzer gewählter Ordner (Android-Ordnerauswahl, als URI) oder null. */
+    val backupFolder: StateFlow<String?> = _backupFolder.asStateFlow()
+
+    fun setBackupFolder(uri: String?) {
+        _backupFolder.value = uri
+        prefs.edit().putString(KEY_AUTO_BACKUP_FOLDER, uri).apply()
+    }
+
+    private val _lastAutoBackup = MutableStateFlow(prefs.getLong(KEY_AUTO_BACKUP_LAST, 0L))
+
+    /** Zeitpunkt (epoch ms) des letzten erfolgreichen Backups in den Ordner; 0 = noch keins. */
+    val lastAutoBackup: StateFlow<Long> = _lastAutoBackup.asStateFlow()
+
+    fun setLastAutoBackup(epochMs: Long) {
+        _lastAutoBackup.value = epochMs
+        prefs.edit().putLong(KEY_AUTO_BACKUP_LAST, epochMs).apply()
+    }
+
+    /**
+     * Wurden die früher berechneten Übernachtungsplätze (bis Datenbank-Version 5) schon einmalig
+     * als feste Plätze übernommen?
+     */
+    var overnightPlacesImported: Boolean
+        get() = prefs.getBoolean(KEY_PLACES_IMPORTED, false)
+        set(value) = prefs.edit().putBoolean(KEY_PLACES_IMPORTED, value).apply()
 
     /** Zuletzt geöffnete Ansicht: true = Karte, false = Fahrtenbuch. */
     var lastViewMap: Boolean
@@ -123,5 +175,12 @@ class Settings(context: Context) {
         private const val KEY_MILESTONES_INIT = "meilensteine_geprueft"
         private const val KEY_CORRIDOR = "karte_korridor_m"
         private const val KEY_BACKGROUND_EXPLAINED = "standort_immer_erklaert"
+        private const val KEY_FUEL = "verbrauch_l_100km"
+        private const val KEY_AUTO_BACKUP = "auto_backup_an"
+        private const val KEY_AUTO_BACKUP_INTERVAL = "auto_backup_abstand"
+        private const val KEY_AUTO_BACKUP_KEEP = "auto_backup_anzahl"
+        private const val KEY_AUTO_BACKUP_FOLDER = "auto_backup_ordner"
+        private const val KEY_AUTO_BACKUP_LAST = "auto_backup_zuletzt"
+        private const val KEY_PLACES_IMPORTED = "uebernachtungsplaetze_uebernommen"
     }
 }

@@ -48,6 +48,7 @@ class TrackingService : Service() {
     private val fixes = Channel<TrackFilter.Fix>(capacity = Channel.BUFFERED)
     private var thread: HandlerThread? = null
     private var recorder: TrackRecorder? = null
+    private var borders: BorderWatcher? = null
     private var listening = false
     private var gpsOff = false
     private var watchdog: Job? = null
@@ -86,12 +87,32 @@ class TrackingService : Service() {
                 }
             },
         )
+        // Grenzübertritte erkennen und das Land des Tages anpassen (offline)
+        borders = BorderWatcher(
+            initialCountry = { app.repository.lastCountryUpTo(java.time.LocalDate.now()) },
+            countryAt = { lat, lon ->
+                try {
+                    app.location.countryLocator().countryAt(lat, lon)
+                } catch (e: Exception) {
+                    null
+                }
+            },
+            onCrossed = { at, code -> app.work.onBorderCrossed(at, code) },
+        )
         scope.launch {
             for (fix in fixes) {
-                try {
+                val decision = try {
                     recorder?.onFix(fix)
                 } catch (e: Exception) {
                     Log.e(TAG, "Punkt konnte nicht gespeichert werden", e)
+                    null
+                }
+                if (decision?.keep == true) {
+                    try {
+                        borders?.onPoint(fix.lat, fix.lon, fix.timeMs)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Grenzerkennung fehlgeschlagen", e)
+                    }
                 }
             }
         }

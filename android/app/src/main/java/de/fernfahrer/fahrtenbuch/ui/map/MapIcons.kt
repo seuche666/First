@@ -70,16 +70,29 @@ object MapIcons {
         return bmp
     }
 
-    /** Rundes Symbol mit Mond für Übernachtungsplätze; ab 2 Übernachtungen mit Anzahl. */
-    fun overnight(density: Float, count: Int): Bitmap {
+    /**
+     * Rundes Symbol mit Mond für Übernachtungsplätze; ab 2 Übernachtungen mit Anzahl (oben rechts),
+     * bei bewerteten Plätzen darunter klein die Sterne (1–5). Der Kreis liegt genau in der Bildmitte,
+     * damit das Symbol mit Anker „Mitte“ exakt auf dem Platz sitzt.
+     */
+    fun overnight(density: Float, count: Int, rating: Int = 0): Bitmap {
         val d = density
-        val size = (30 * d).toInt()
-        val badge = if (count > 1) (11 * d) else 0f
-        val bmp = Bitmap.createBitmap((size + badge).toInt(), (size + badge).toInt(), Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        val cx = size / 2f
-        val cy = badge + size / 2f
+        val size = 30 * d
         val r = size / 2f - 2 * d
+        val stars = rating.coerceIn(0, 5)
+        val starR = 3.6f * d
+        val starStep = 8 * d
+        val pillW = if (stars > 0) 5 * starStep + 6 * d else 0f
+        val pillH = if (stars > 0) 11 * d else 0f
+        val top = size / 2f + if (count > 1) 11 * d else 0f
+        val bottom = size / 2f + if (stars > 0) pillH - 2 * d else 0f
+        val half = maxOf(top, bottom)
+        val w = maxOf(size + if (count > 1) 22 * d else 0f, pillW).toInt() + 2
+        val h = (2 * half).toInt() + 2
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val cx = w / 2f
+        val cy = h / 2f
         c.drawCircle(cx, cy, r, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             setShadowLayer(3 * d, 0f, 1 * d, Color.argb(140, 0, 0, 0))
@@ -91,13 +104,27 @@ object MapIcons {
             val cut = Path().apply { addCircle(cx + 3.5f * d, cy - 3 * d, 6.5f * d, Path.Direction.CW) }
             op(cut, Path.Op.DIFFERENCE)
         }
-        c.drawPath(moon, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(0xFF, 0xD5, 0x4F) })
+        c.drawPath(moon, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MOON })
+        if (stars > 0) {
+            val py = cy + r - 1 * d
+            val pill = RectF(cx - pillW / 2, py, cx + pillW / 2, py + pillH)
+            c.drawRoundRect(pill, pillH / 2, pillH / 2, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                setShadowLayer(2 * d, 0f, 0.5f * d, Color.argb(120, 0, 0, 0))
+            })
+            val on = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = STAR }
+            val off = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(0xD0, 0xD0, 0xD0) }
+            for (i in 0 until 5) {
+                val sx = pill.left + 3 * d + starStep * (i + 0.5f)
+                c.drawPath(star(sx, pill.centerY(), starR), if (i < stars) on else off)
+            }
+        }
         if (count > 1) {
-            val bx = cx + r * 0.8f
-            val by = badge + 1 * d
             val br = 9 * d
-            c.drawCircle(bx, by + br - 2 * d, br, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
-            c.drawCircle(bx, by + br - 2 * d, br - 1.5f * d, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BLUE })
+            val bx = cx + r * 0.8f
+            val by = cy - r - 2 * d
+            c.drawCircle(bx, by, br, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+            c.drawCircle(bx, by, br - 1.5f * d, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BLUE })
             val text = if (count > 99) "99+" else count.toString()
             val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.WHITE
@@ -105,8 +132,24 @@ object MapIcons {
                 typeface = Typeface.DEFAULT_BOLD
                 textSize = (if (text.length > 2) 8 else 10) * d
             }
-            c.drawText(text, bx, by + br - 2 * d + tp.textSize * 0.36f, tp)
+            c.drawText(text, bx, by + tp.textSize * 0.36f, tp)
         }
         return bmp
+    }
+
+    private val MOON = Color.rgb(0xFF, 0xD5, 0x4F)
+    private val STAR = Color.rgb(0xF5, 0xA6, 0x23)
+
+    /** Fünfzackiger Stern um ([cx], [cy]) mit Außenradius [r]. */
+    private fun star(cx: Float, cy: Float, r: Float): Path = Path().apply {
+        val inner = r * 0.45f
+        for (i in 0 until 10) {
+            val rad = if (i % 2 == 0) r else inner
+            val a = Math.toRadians(-90.0 + i * 36.0)
+            val x = cx + (rad * Math.cos(a)).toFloat()
+            val y = cy + (rad * Math.sin(a)).toFloat()
+            if (i == 0) moveTo(x, y) else lineTo(x, y)
+        }
+        close()
     }
 }

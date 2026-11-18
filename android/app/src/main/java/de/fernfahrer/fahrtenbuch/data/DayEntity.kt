@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import de.fernfahrer.fahrtenbuch.domain.DayCountries
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import java.time.LocalDate
 
@@ -53,7 +54,27 @@ data class DayEntity(
      * bestätigt). Nur dann passt die App sie beim Arbeitsende noch an.
      */
     @ColumnInfo(defaultValue = "0") val timesAuto: Boolean = false,
+    /**
+     * Alle Länder des Tages in der Reihenfolge des Besuchs, durch Komma getrennt (z. B. „DE,NL,DE“);
+     * leer = nur [countryCode]. [countryCode] ist das Land, für das der Tag zählt (siehe [DayCountries]).
+     */
+    @ColumnInfo(defaultValue = "") val countries: String = "",
 ) {
+    /** Länder des Tages in Besuchsreihenfolge (mindestens eins). */
+    val countryRoute: List<String> get() = DayCountries.parse(countries, countryCode)
+
+    /** Jedes Land des Tages einmal (für die Anzeige). */
+    val allCountries: List<String> get() = DayCountries.distinct(countryRoute)
+
+    /** Land, in dem man am Ende des Tages war (Startland des Folgetags). */
+    val lastCountry: String get() = countryRoute.last()
+
+    /** Setzt die Länder des Tages und daraus das zählende Land. */
+    fun withCountries(route: List<String>): DayEntity {
+        val r = DayCountries.collapse(route).ifEmpty { listOf(countryCode) }
+        return copy(countries = DayCountries.join(r), countryCode = DayCountries.counting(r))
+    }
+
     val absenceMinutes: Int get() = (endMinute - startMinute).coerceAtLeast(0)
 
     /** Gefahrene km, falls beide Kilometerstände vorhanden und plausibel sind. */

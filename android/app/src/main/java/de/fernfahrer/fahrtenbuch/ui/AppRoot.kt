@@ -116,8 +116,8 @@ fun AppRoot() {
     kmPrompt?.let { prompt ->
         KmDialog(
             prompt = prompt,
-            onSave = { vm.confirmKm(it) },
-            onLater = { vm.confirmKm(null) },
+            onSave = { km, savePlace -> vm.confirmKm(km, savePlace) },
+            onLater = { savePlace -> vm.confirmKm(null, savePlace) },
             onDismiss = vm::dismissKmPrompt,
         )
     }

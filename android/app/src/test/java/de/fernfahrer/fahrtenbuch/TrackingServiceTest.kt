@@ -156,32 +156,60 @@ class TrackingServiceTest {
     }
 
     @Test
-    fun arbeitBeendenSpeichertDenStandortFuerUebernachtungen() = runBlocking {
+    fun uebernachtungsplatzNurMitHakenBeimArbeitBeenden() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(app, AppDatabase::class.java).allowMainThreadQueries().build()
         try {
             val settings = Settings(app)
             settings.setWorkSettings(WorkSettings(reminderEnabled = false, gpsEnabled = false))
-            val now = LocalDateTime.now().withSecond(0).withNano(0)
+            val now = LocalDateTime.now().withSecond(0).withNano(0).withHour(20)
             val repo = Repository(db, settings.rules)
+            var fix = de.fernfahrer.fahrtenbuch.work.StopFix(49.79, 9.95, "DE")
             val controller = WorkController(
                 repo, settings, ReminderScheduler(app, settings), LocationProvider(app),
-                clock = { now }, stopLocator = { de.fernfahrer.fahrtenbuch.work.StopFix(49.79, 9.95, "DE") },
+                clock = { now }, stopLocator = { fix },
             )
-            controller.startWork(now.minusHours(3))
-            controller.endWork(now, 1000)
-            controller.pendingStop?.join()
-            val stop = db.stopDao().getAllStops().single()
-            assertEquals(now.toLocalDate(), stop.date)
-            assertEquals(now.hour * 60 + now.minute, stop.minute)
-            assertEquals(4_979_000 to 995_000, stop.latE5 to stop.lonE5)
-            assertEquals("DE", stop.countryCode)
+            // Ohne Haken: kein Kartenpunkt
+            controller.startWork(now.minusHours(10))
+            controller.endWork(now.minusHours(8), 1000)
+            controller.pendingPlace?.join()
+            assertTrue(repo.getOvernightPlaces().isEmpty())
+            assertTrue("keine automatischen Standorte mehr", db.stopDao().getAllStops().isEmpty())
+
+            // Mit Haken: Platz an der aktuellen Position
+            controller.startWork(now.minusHours(6))
+            controller.endWork(now, 1100, savePlace = true)
+            controller.pendingPlace?.join()
+            val first = repo.getOvernightPlaces().single()
+            assertEquals(4_979_000 to 995_000, first.place.latE5 to first.place.lonE5)
+            assertEquals("DE", first.place.countryCode)
+            assertEquals(now.toLocalDate(), first.stays.single().date)
+            assertEquals(now.hour * 60 + now.minute, first.stays.single().minute)
+
+            // Name vergeben; nächste Übernachtung 120 m daneben → gleicher Platz, Anzahl 2, Name bleibt
+            repo.updateOvernightPlace(first.place.copy(name = "Autohof Fulda", rating = 4))
+            fix = de.fernfahrer.fahrtenbuch.work.StopFix(49.79108, 9.95, "DE")
+            controller.startWork(now.plusHours(1))
+            controller.endWork(now.plusHours(2), 1200, savePlace = true)
+            controller.pendingPlace?.join()
+            val same = repo.getOvernightPlaces().single()
+            assertEquals(2, same.count)
+            assertEquals("Autohof Fulda", same.place.name)
+            assertEquals(4, same.place.rating)
+            assertEquals("Position bleibt fest", 4_979_000, same.place.latE5)
+
+            // Weit weg → neuer Platz
+            fix = de.fernfahrer.fahrtenbuch.work.StopFix(52.0, 13.0, "DE")
+            controller.startWork(now.plusHours(3))
+            controller.endWork(now.plusHours(4), 1300, savePlace = true)
+            controller.pendingPlace?.join()
+            assertEquals(2, repo.getOvernightPlaces().size)
 
             // Ohne Standort (keine Berechtigung, kein GPS): nichts gespeichert, Arbeitsende klappt trotzdem
-            val noFix = WorkController(repo, settings, ReminderScheduler(app, settings), LocationProvider(app), clock = { now.plusHours(5) })
-            noFix.startWork(now.plusHours(1))
-            assertNotNull(noFix.endWork(now.plusHours(2), null))
-            noFix.pendingStop?.join()
-            assertEquals(1, db.stopDao().getAllStops().size)
+            val noFix = WorkController(repo, settings, ReminderScheduler(app, settings), LocationProvider(app), clock = { now.plusHours(8) })
+            noFix.startWork(now.plusHours(5))
+            assertNotNull(noFix.endWork(now.plusHours(6), null, savePlace = true))
+            noFix.pendingPlace?.join()
+            assertEquals(2, repo.getOvernightPlaces().size)
         } finally {
             db.close()
         }

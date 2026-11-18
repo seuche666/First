@@ -28,11 +28,11 @@ class WorkController(
     private val clock: () -> LocalDateTime = LocalDateTime::now,
     /** Streckenaufzeichnung für die Karte (nur während der Arbeitszeit). */
     private val tracking: TrackingControl = TrackingControl.NONE,
-    /** Position beim Arbeitsende für die Übernachtungsorte auf der Karte. */
+    /** Position beim Arbeitsende für den Übernachtungsplatz auf der Karte. */
     private val stopLocator: StopLocator = StopLocator.NONE,
 ) {
-    /** Zuletzt gestartete Standort-Speicherung (für Tests). */
-    @Volatile var pendingStop: kotlinx.coroutines.Job? = null
+    /** Zuletzt gestartete Speicherung eines Übernachtungsplatzes (für Tests). */
+    @Volatile var pendingPlace: kotlinx.coroutines.Job? = null
         private set
 
     /** Hintergrundaufgaben (GPS), die weiterlaufen, auch wenn ein Bildschirm geschlossen wird. */
@@ -50,16 +50,22 @@ class WorkController(
         if (result is StartResult.Started) {
             reminders.scheduleFor(result.shift, now())
             tracking.sync(workRunning = true)
-            detectCountryLater(at.toLocalDate())
+            // Das vom Vortag übernommene Land durch das tatsächliche ersetzen
+            detectCountryLater(at.toLocalDate(), replaceSingle = true)
         }
         return result
     }
 
-    suspend fun endWork(at: LocalDateTime, km: Int?): WorkShiftEntity? {
+    /**
+     * Arbeit beenden. Nur wenn [savePlace] gesetzt ist (Haken im km-Fenster), wird an der aktuellen
+     * Position ein Übernachtungsplatz auf der Karte gespeichert. Die Zählung „Übernachtung im LKW“
+     * für die Steuer hängt davon nicht ab.
+     */
+    suspend fun endWork(at: LocalDateTime, km: Int?, savePlace: Boolean = false): WorkShiftEntity? {
         val ended = repo.endWork(at, km) ?: return null
         reminders.cancel()
         tracking.sync(workRunning = false)
-        recordStopLater(ended)
+        if (savePlace) savePlaceLater(ended)
         detectCountryLater(ended.endDate ?: at.toLocalDate())
         return ended
     }
@@ -70,7 +76,6 @@ class WorkController(
             if (result.endedShift != null) {
                 reminders.cancel()
                 tracking.sync(workRunning = false)
-                recordStopLater(result.endedShift)
             }
             detectCountryLater(at.toLocalDate())
         }
@@ -99,34 +104,56 @@ class WorkController(
         tracking.sync(workRunning = repo.getRunningShift() != null)
     }
 
-    /** Speichert im Hintergrund die Position beim Arbeitsende (Übernachtungsort, falls der Tag eine Übernachtung ist). */
-    private fun recordStopLater(shift: WorkShiftEntity) {
+    /**
+     * Grenzübertritt während der Arbeitszeit (von der Streckenaufzeichnung erkannt): Land für den
+     * aktuellen Tag ergänzen, sofern es dort nicht von Hand gewählt wurde.
+     */
+    suspend fun onBorderCrossed(at: LocalDateTime, code: String): Boolean {
+        if (!settings.work.value.gpsEnabled) return false
+        if (repo.getRunningShift() == null) return false
+        val changed = repo.recordBorderCrossing(at, code)
+        if (changed) _messages.tryEmit("Grenze überquert: ${Countries.label(code)}")
+        return changed
+    }
+
+    /** Speichert im Hintergrund die aktuelle Position als Übernachtungsplatz auf der Karte. */
+    private fun savePlaceLater(shift: WorkShiftEntity) {
         val date = shift.endDate ?: return
         val minute = (shift.endMinute ?: 0).coerceIn(0, 24 * 60)
-        pendingStop = scope.launch {
+        pendingPlace = scope.launch {
             val fix = try {
                 stopLocator.locate()
             } catch (e: Exception) {
                 null
-            } ?: return@launch
-            repo.addStop(
-                de.fernfahrer.fahrtenbuch.data.StopLocationEntity(
+            }
+            if (fix == null) {
+                _messages.tryEmit("Übernachtungsplatz nicht gespeichert – kein GPS-Standort.")
+                return@launch
+            }
+            try {
+                val place = repo.addOvernightStay(
                     date = date,
                     minute = minute,
                     latE5 = Math.round(fix.lat * 100_000).toInt(),
                     lonE5 = Math.round(fix.lon * 100_000).toInt(),
                     countryCode = fix.countryCode,
-                ),
-            )
+                )
+                _messages.tryEmit(
+                    if (place.name.isNotBlank()) "Übernachtung bei „${place.name}“ gespeichert"
+                    else "Übernachtungsplatz auf der Karte gespeichert",
+                )
+            } catch (e: Exception) {
+                _messages.tryEmit("Übernachtungsplatz konnte nicht gespeichert werden.")
+            }
         }
     }
 
     /** Ermittelt das Land per GPS im Hintergrund und übernimmt es, falls nicht von Hand gewählt. */
-    private fun detectCountryLater(date: LocalDate) {
+    private fun detectCountryLater(date: LocalDate, replaceSingle: Boolean = false) {
         if (!settings.work.value.gpsEnabled || !location.hasPermission()) return
         scope.launch {
             val code = location.currentCountry() ?: return@launch
-            if (repo.applyDetectedCountry(date, code)) {
+            if (repo.applyDetectedCountry(date, code, replaceSingle)) {
                 _messages.tryEmit("Land per GPS: ${Countries.label(code)}")
             }
         }

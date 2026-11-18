@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         DayEntity::class, TourEntity::class, WorkShiftEntity::class, TrackChunkEntity::class,
-        StopLocationEntity::class, MilestoneEntity::class,
+        StopLocationEntity::class, MilestoneEntity::class, OvernightPlaceEntity::class, OvernightStayEntity::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = true,
@@ -30,7 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun stopDao(): StopDao
 
     companion object {
-        const val VERSION = 5
+        const val VERSION = 6
         const val DB_NAME = "fahrtenbuch.db"
 
         fun create(context: Context): AppDatabase =
@@ -123,6 +123,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        /**
+         * Version 5 → 6:
+         * - neue Spalte `days.countries` (alle Länder des Tages; bestehende Tage: leer = nur `countryCode`)
+         * - neue Tabellen `overnight_places` (Übernachtungsplätze mit Name und Notizen) und
+         *   `overnight_stays` (einzelne Übernachtungen je Platz). Die bisher angezeigten Plätze werden
+         *   nach dem Öffnen einmalig übernommen (siehe [OvernightImport]), da sie aus Tagen und
+         *   GPS-Strecken berechnet wurden. Bestehende Tabellen und Spalten bleiben unverändert.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE days ADD COLUMN countries TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `overnight_places` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`latE5` INTEGER NOT NULL, `lonE5` INTEGER NOT NULL, `countryCode` TEXT, " +
+                        "`name` TEXT NOT NULL DEFAULT '', `rating` INTEGER NOT NULL DEFAULT 0, " +
+                        "`shower` INTEGER NOT NULL DEFAULT 0, `toilet` INTEGER NOT NULL DEFAULT 0, " +
+                        "`food` INTEGER NOT NULL DEFAULT 0, `secure` INTEGER NOT NULL DEFAULT 0, " +
+                        "`quiet` INTEGER NOT NULL DEFAULT 0, `note` TEXT NOT NULL DEFAULT '')",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `overnight_stays` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`placeId` INTEGER NOT NULL, `date` TEXT NOT NULL, `minute` INTEGER NOT NULL, " +
+                        "`latE5` INTEGER NOT NULL, `lonE5` INTEGER NOT NULL, " +
+                        "FOREIGN KEY(`placeId`) REFERENCES `overnight_places`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_overnight_stays_placeId` ON `overnight_stays` (`placeId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_overnight_stays_date` ON `overnight_stays` (`date`)")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
     }
 }

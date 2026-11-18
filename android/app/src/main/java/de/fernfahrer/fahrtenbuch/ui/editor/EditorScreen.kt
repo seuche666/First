@@ -64,7 +64,8 @@ fun EditorScreen(
     var pickDate by rememberSaveable { mutableStateOf(false) }
     var pickStart by rememberSaveable { mutableStateOf(false) }
     var pickEnd by rememberSaveable { mutableStateOf(false) }
-    var pickCountry by rememberSaveable { mutableStateOf(false) }
+    /** Länderauswahl: -2 = geschlossen, -1 = Land hinzufügen, sonst Index des zu ersetzenden Landes. */
+    var pickCountry by rememberSaveable { mutableStateOf(-2) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(s.finished) {
@@ -159,7 +160,7 @@ fun EditorScreen(
             WorkSection(s, vm)
 
             // Land
-            CountrySection(s, onPickCountry = { pickCountry = true })
+            CountrySection(s, onPickCountry = { pickCountry = it ?: -1 }, onRemove = vm::removeCountry)
 
             // Kilometer
             KmSection(s, vm)
@@ -207,15 +208,16 @@ fun EditorScreen(
             onDismiss = vm::closeShift,
         )
     }
-    if (pickCountry) {
+    if (pickCountry >= -1) {
+        val index = pickCountry.takeIf { it >= 0 }
         CountryPickerSheet(
-            selected = s.countryCode,
+            selected = index?.let { s.shownCountries.getOrNull(it) } ?: "",
             recent = recent,
             onSelect = {
-                vm.setCountry(it)
-                pickCountry = false
+                vm.setCountry(index, it)
+                pickCountry = -2
             },
-            onDismiss = { pickCountry = false },
+            onDismiss = { pickCountry = -2 },
         )
     }
     if (confirmDelete) {

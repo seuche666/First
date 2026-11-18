@@ -172,7 +172,54 @@ class BackupAndCsvTest {
         assertEquals(withStops.stops, restored.stops)
         assertEquals(withStops.milestones, restored.milestones)
         assertEquals(false, restored.mapSettings?.showOvernights)
-        assertEquals(5, org.json.JSONObject(Backup.toJson(withStops)).getInt("version"))
+        assertEquals(Backup.VERSION, org.json.JSONObject(Backup.toJson(withStops)).getInt("version"))
+    }
+
+    /** Format 6: mehrere Länder pro Tag, Übernachtungsplätze mit Namen/Notizen, Verbrauch, automatisches Backup. */
+    @Test
+    fun sicherungFormat6MitPlaetzenNotizenLaendernUndEinstellungen() {
+        val place = de.fernfahrer.fahrtenbuch.data.OvernightPlaceEntity(
+            id = 7, latE5 = 5_055_000, lonE5 = 967_000, countryCode = "DE", name = "Autohof Fulda", rating = 4,
+            shower = true, toilet = true, food = false, secure = true, quiet = false, note = "ab 18 Uhr voll; \"eng\"",
+        )
+        val stays = listOf(
+            de.fernfahrer.fahrtenbuch.data.OvernightStayEntity(11, 7, mo, 1260, 5_055_010, 967_020),
+            de.fernfahrer.fahrtenbuch.data.OvernightStayEntity(12, 7, mo.plusDays(1), 1300, 5_054_990, 966_980),
+        )
+        val full = data.copy(
+            days = data.days.map { if (it.id == 2L) it.withCountries(listOf("DE", "NL", "DE")) else it },
+            places = listOf(de.fernfahrer.fahrtenbuch.data.OvernightPlace(place, stays)),
+            mapSettings = de.fernfahrer.fahrtenbuch.data.MapSettings(fuelPer100Km = 31.5),
+            autoBackup = de.fernfahrer.fahrtenbuch.data.AutoBackupSettings(
+                enabled = true, interval = de.fernfahrer.fahrtenbuch.data.AutoBackupSettings.Interval.MONTHLY, keep = 10,
+            ),
+        )
+        val json = Backup.toJson(full)
+        assertEquals(6, org.json.JSONObject(json).getInt("version"))
+        val restored = Backup.fromJson(json)
+        assertEquals(full, restored)
+        val day = restored.days.first { it.id == 2L }
+        assertEquals(listOf("DE", "NL", "DE"), day.countryRoute)
+        assertEquals("NL", day.countryCode)
+        assertEquals(listOf("DE", "NL"), day.allCountries)
+        assertEquals(31.5, restored.mapSettings!!.fuelPer100Km, 0.0)
+    }
+
+    /** Sicherung aus App-Version 1.0.12 (Format 5): ohne Plätze, Länderliste, Verbrauch – sinnvolle Werte. */
+    @Test
+    fun alteSicherungVersion5WirdGeladen() {
+        val v5 = org.json.JSONObject(Backup.toJson(data.copy(mapSettings = de.fernfahrer.fahrtenbuch.data.MapSettings()))).apply {
+            put("version", 5)
+            put("mapSettings", org.json.JSONObject().put("trackingEnabled", true).put("corridorMeters", 100).put("showOvernights", true))
+            val days = getJSONArray("days")
+            for (i in 0 until days.length()) days.getJSONObject(i).remove("countries")
+        }.toString()
+        val restored = Backup.fromJson(v5)
+        assertEquals(data.days, restored.days)
+        assertTrue(restored.days.all { it.countryRoute == listOf(it.countryCode) })
+        assertNull(restored.places)
+        assertNull(restored.autoBackup)
+        assertEquals(27.0, restored.mapSettings!!.fuelPer100Km, 0.0)
     }
 
     /** Sicherung aus App-Version 1.0.10 (Format 4): ohne Standorte/Meilensteine – vorhandene bleiben erhalten. */
@@ -213,12 +260,12 @@ class BackupAndCsvTest {
         // Montag: Tour-Anreisetag, Übernachtung, Arbeit 05:30–24:00, km geschätzt
         assertTrue(
             csv.contains(
-                "04.05.2026;Mo;Frankreich;FR;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;;ja;ja;" +
+                "04.05.2026;Mo;Frankreich;FR;Frankreich;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;;ja;ja;" +
                     "05:30–24:00;18:30;100;700;600;ja;\"Lyon; \"\"Kühl\"\"\"",
             ),
         )
         // Dienstag: Rückreisetag (manuell voll), Arbeit 00:00–02:00 aus der Schicht über Mitternacht
-        assertTrue(csv.contains("05.05.2026;Di;Deutschland;DE;00:00;15:00;15:00;Voller Tag;Manuell geändert"))
+        assertTrue(csv.contains("05.05.2026;Di;Deutschland;DE;Deutschland;00:00;15:00;15:00;Voller Tag;Manuell geändert"))
         assertTrue(csv.contains(";ja;;ja;;00:00–02:00;2:00;700;900;200;;"))
         assertTrue(csv.contains("Übernachtungen im LKW;2"))
         assertTrue(csv.contains("Arbeitszeit gesamt (Std.);20:30"))

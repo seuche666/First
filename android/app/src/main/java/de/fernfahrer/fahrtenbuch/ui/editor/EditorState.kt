@@ -1,5 +1,6 @@
 package de.fernfahrer.fahrtenbuch.ui.editor
 
+import de.fernfahrer.fahrtenbuch.domain.DayCountries
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import de.fernfahrer.fahrtenbuch.domain.Stats
 import de.fernfahrer.fahrtenbuch.domain.WorkPortion
@@ -19,7 +20,8 @@ data class EditorState(
     val date: LocalDate = LocalDate.now(),
     val startMinute: Int = 6 * 60,
     val endMinute: Int = 18 * 60,
-    val countryCode: String = Stats.HOME_COUNTRY,
+    /** Länder des Tages in Besuchsreihenfolge (mindestens eins). */
+    val countries: List<String> = listOf(Stats.HOME_COUNTRY),
     /** Land von Hand gewählt (GPS ändert es dann nicht mehr). */
     val countryManual: Boolean = false,
     val kmStart: String = "",
@@ -58,6 +60,12 @@ data class EditorState(
     val overnight: Boolean get() = overnightOverride ?: overnightAuto
     val workMinutes: Int get() = WorkSplitter.minutes(work)
     val isTourDay: Boolean get() = tourId != null || mode == EditorMode.TOUR_START
+
+    /** Land, für das der Tag zählt (Ausland hat Vorrang). */
+    val countryCode: String get() = DayCountries.counting(countries)
+
+    /** Jedes Land einmal, für die Anzeige. */
+    val shownCountries: List<String> get() = DayCountries.distinct(countries)
 
     val title: String
         get() = when (mode) {

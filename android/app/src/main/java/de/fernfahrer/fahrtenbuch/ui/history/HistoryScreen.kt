@@ -161,7 +161,8 @@ private fun DayCard(entry: ClassifiedDay, work: List<WorkPortion>?, onClick: () 
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(Countries.flag(d.countryCode), fontSize = 18.sp)
+                    // Alle Länder des Tages als Flaggen; der Name ist das Land, für das der Tag zählt
+                    Text(d.allCountries.joinToString(" ") { Countries.flag(it) }, fontSize = 18.sp)
                     Spacer(Modifier.width(6.dp))
                     Text(
                         Countries.name(d.countryCode),

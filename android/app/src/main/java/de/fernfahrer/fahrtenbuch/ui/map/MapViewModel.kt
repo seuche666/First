@@ -10,15 +10,16 @@ import de.fernfahrer.fahrtenbuch.FahrtenbuchApp
 import de.fernfahrer.fahrtenbuch.data.TrackChunkEntity
 import de.fernfahrer.fahrtenbuch.data.TrackChunkMeta
 import de.fernfahrer.fahrtenbuch.data.TrackChunks
-import de.fernfahrer.fahrtenbuch.data.StopLocationEntity
+import de.fernfahrer.fahrtenbuch.data.MapSettings
+import de.fernfahrer.fahrtenbuch.data.OvernightPlace
+import de.fernfahrer.fahrtenbuch.data.OvernightPlaceEntity
+import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
-import de.fernfahrer.fahrtenbuch.domain.geo.Overnights
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import de.fernfahrer.fahrtenbuch.domain.geo.FogGeometry
 import de.fernfahrer.fahrtenbuch.domain.geo.TrackCodec
@@ -35,6 +36,8 @@ import kotlinx.coroutines.launch
 data class MapStats(
     val countries: Set<String> = emptySet(),
     val distanceKm: Double = 0.0,
+    /** Geschätzte Liter Diesel aus den Tacho-km (eingetragene Kilometerstände), gerundet. */
+    val dieselLiters: Long = 0,
 )
 
 /** Kartenausschnitt, damit die Karte beim Wechsel der Reiter an derselben Stelle bleibt. */
@@ -42,22 +45,28 @@ data class Camera(val lat: Double, val lon: Double, val zoom: Double)
 
 /**
  * Lädt die Strecken, bereitet sie für den Nebel auf ([FogGeometry]), berechnet die Statistik und
- * die Übernachtungsplätze.
+ * stellt die gespeicherten Übernachtungsplätze bereit (Bearbeiten über [repo]).
  * Bei neuen Punkten während der Fahrt werden nur die geänderten Stücke neu gelesen.
  */
 class MapViewModel(
     private val meta: Flow<List<TrackChunkMeta>>,
     private val load: suspend (List<Long>) -> List<TrackChunkEntity>,
-    days: Flow<List<ClassifiedDay>> = emptyFlow(),
-    stops: Flow<List<StopLocationEntity>> = emptyFlow(),
-    private val zone: ZoneId = ZoneId.systemDefault(),
+    days: Flow<List<ClassifiedDay>> = flowOf(emptyList()),
+    places: Flow<List<OvernightPlace>> = emptyFlow(),
+    /** Verbrauch in Litern pro 100 km. */
+    fuelPer100Km: Flow<Double> = flowOf(MapSettings.DEFAULT_FUEL),
+    private val repo: Repository? = null,
 ) : ViewModel() {
 
     private val _geometry = MutableStateFlow<FogGeometry?>(null)
     val geometry: StateFlow<FogGeometry?> = _geometry.asStateFlow()
 
-    private val _stats = MutableStateFlow(MapStats())
-    val stats: StateFlow<MapStats> = _stats.asStateFlow()
+    private val trackStats = MutableStateFlow(MapStats())
+
+    /** Statistik: Strecken (GPS) und Diesel aus den Tacho-km. */
+    val stats: StateFlow<MapStats> = combine(trackStats, days, fuelPer100Km) { t, d, fuel ->
+        t.copy(dieselLiters = dieselLiters(d, fuel))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapStats())
 
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
@@ -69,21 +78,9 @@ class MapViewModel(
 
     private val cache = HashMap<Long, FogGeometry.ChunkGeom>()
 
-    /** Letzter GPS-Punkt je Tag und Streckenstück (für Übernachtungen ohne gespeicherten Standort). */
-    private val dayEnds = HashMap<Long, Map<LocalDate, Overnights.Spot>>()
-    private val trackDayEnds = MutableStateFlow<Map<LocalDate, Overnights.Spot>>(emptyMap())
-
-    /** Übernachtungsplätze, zu Stammplätzen (Umkreis 200 m) zusammengefasst. */
-    val overnights: StateFlow<List<Overnights.Cluster>> =
-        combine(days, stops, trackDayEnds) { d, st, ends ->
-            val stopsByDate = st.groupBy { it.date }.mapValues { (_, list) ->
-                val last = list.maxBy { it.minute }
-                Overnights.Spot(last.date, last.latE5, last.lonE5, last.countryCode)
-            }
-            val nights = d.filter { it.overnight }.map { it.day.date }
-            Overnights.cluster(Overnights.spots(nights, stopsByDate, ends))
-        }.flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** Gespeicherte Übernachtungsplätze (fest; entstehen nur beim „Arbeit beenden“ mit Haken). */
+    val overnights: StateFlow<List<OvernightPlace>> =
+        places.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         viewModelScope.launch(Dispatchers.Default) {
@@ -103,62 +100,74 @@ class MapViewModel(
         val ids = metaList.map { it.id }.toHashSet()
         val removed = cache.keys.filter { it !in ids }
         val changed = metaList.filter { m -> cache[m.id]?.pointCount != m.pointCount }
-        removed.forEach {
-            cache.remove(it)
-            dayEnds.remove(it)
-        }
+        removed.forEach { cache.remove(it) }
 
         for (chunk in load(changed.map { it.id })) {
             try {
                 val d = TrackCodec.decode(chunk.data)
                 if (d.size == 0) continue
                 cache[chunk.id] = FogGeometry.chunk(chunk.id, chunk.trackId, chunk.seq, d.latE5, d.lonE5)
-                dayEnds[chunk.id] = lastPointPerDay(d)
             } catch (e: Exception) {
                 Log.w(TAG, "Streckenstück ${chunk.id} ist beschädigt und wird übersprungen", e)
             }
         }
 
         _geometry.value = FogGeometry(cache.values.toList())
-
-        if (changed.isNotEmpty() || removed.isNotEmpty()) {
-            val merged = HashMap<LocalDate, Overnights.Spot>()
-            for (m in dayEnds.values) for ((date, spot) in m) {
-                val prev = merged[date]
-                if (prev == null || spot.timeKey > prev.timeKey) merged[date] = spot
-            }
-            trackDayEnds.value = merged
-        }
-        _stats.value = MapStats(
+        trackStats.value = MapStats(
             countries = TrackChunks.countriesOf(metaList),
             distanceKm = metaList.sumOf { it.lengthMeters } / 1000.0,
         )
-    }
-
-    private fun lastPointPerDay(d: TrackCodec.Decoded): Map<LocalDate, Overnights.Spot> {
-        val out = HashMap<LocalDate, Overnights.Spot>()
-        val times = HashMap<LocalDate, Long>()
-        for (i in 0 until d.size) {
-            val date = Instant.ofEpochSecond(d.timeSec[i]).atZone(zone).toLocalDate()
-            if ((times[date] ?: Long.MIN_VALUE) <= d.timeSec[i]) {
-                times[date] = d.timeSec[i]
-                out[date] = Overnights.Spot(date, d.latE5[i], d.lonE5[i], null, d.timeSec[i])
-            }
-        }
-        return out
     }
 
     fun dismissHint(id: String) {
         dismissedHints.value = dismissedHints.value + id
     }
 
+    // ---------- Übernachtungsplätze bearbeiten ----------
+
+    private fun edit(block: suspend Repository.() -> Unit) {
+        val r = repo ?: return
+        viewModelScope.launch {
+            try {
+                r.block()
+            } catch (e: Exception) {
+                Log.e(TAG, "Übernachtungsplatz konnte nicht gespeichert werden", e)
+            }
+        }
+    }
+
+    /** Name oder Notizen speichern. */
+    fun updatePlace(place: OvernightPlaceEntity) = edit { updateOvernightPlace(place) }
+
+    /** Platz an eine neue Position versetzen. */
+    fun movePlace(place: OvernightPlaceEntity, lat: Double, lon: Double, countryCode: String?) = edit {
+        updateOvernightPlace(
+            place.copy(
+                latE5 = Math.round(lat * 100_000).toInt(),
+                lonE5 = Math.round(lon * 100_000).toInt(),
+                countryCode = countryCode ?: place.countryCode,
+            ),
+        )
+    }
+
+    fun deletePlace(id: Long) = edit { deleteOvernightPlace(id) }
+
+    fun deleteStay(id: Long) = edit { deleteOvernightStay(id) }
+
     companion object {
         private const val TAG = "MapViewModel"
+
+        /** Liter Diesel aus allen eingetragenen Tacho-km, auf ganze Liter gerundet. */
+        fun dieselLiters(days: List<ClassifiedDay>, per100Km: Double): Long =
+            Math.round(days.sumOf { (it.day.distanceKm ?: 0).toLong() } * per100Km / 100.0)
 
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as FahrtenbuchApp
-                MapViewModel(app.tracks.meta, app.tracks::load, app.repository.classifiedDays, app.repository.stops)
+                MapViewModel(
+                    app.tracks.meta, app.tracks::load, app.repository.classifiedDays, app.repository.overnightPlaces,
+                    app.settings.map.map { it.fuelPer100Km }.distinctUntilChanged(), app.repository,
+                )
             }
         }
     }

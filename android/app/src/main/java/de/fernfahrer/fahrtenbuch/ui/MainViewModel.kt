@@ -8,7 +8,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import de.fernfahrer.fahrtenbuch.FahrtenbuchApp
+import android.content.Intent
+import de.fernfahrer.fahrtenbuch.data.AutoBackupSettings
 import de.fernfahrer.fahrtenbuch.data.BackupFiles
+import de.fernfahrer.fahrtenbuch.data.OvernightImport
+import de.fernfahrer.fahrtenbuch.data.SafBackupFolder
+import de.fernfahrer.fahrtenbuch.work.AutoBackup
 import de.fernfahrer.fahrtenbuch.export.ExportFormat
 import de.fernfahrer.fahrtenbuch.export.YearExport
 import de.fernfahrer.fahrtenbuch.data.BackupData
@@ -93,7 +98,7 @@ class MainViewModel(
             tourId = tour.id,
             startDate = start,
             dayNumber = ChronoUnit.DAYS.between(start, today).toInt() + 1,
-            lastCountry = tourDays.maxBy { it.date }.countryCode,
+            lastCountry = tourDays.maxBy { it.date }.lastCountry,
             todayEntered = tourDays.any { it.date == today },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -191,6 +196,7 @@ class MainViewModel(
 
     /** Beim Öffnen der App: neue Tage einer laufenden Schicht anlegen, Hinweise anzeigen. */
     fun onForeground() {
+        app?.importOldOvernightPlacesIfNeeded()
         viewModelScope.launch {
             try {
                 work.onForeground()
@@ -257,15 +263,18 @@ class MainViewModel(
         }
     }
 
-    /** km-Abfrage beantwortet: [km] = null bei „Später“. Beendet in beiden Fällen. */
-    fun confirmKm(km: Int?) {
+    /**
+     * km-Abfrage beantwortet: [km] = null bei „Später“. Beendet in beiden Fällen.
+     * [savePlace]: Haken „Übernachtungsplatz auf der Karte speichern“ (nur bei „Arbeit beenden“).
+     */
+    fun confirmKm(km: Int?, savePlace: Boolean = false) {
         val prompt = _kmPrompt.value ?: return
         _kmPrompt.value = null
         viewModelScope.launch {
             try {
                 when (prompt.kind) {
                     KmPrompt.Kind.END_WORK -> {
-                        val ended = work.endWork(prompt.at, km)
+                        val ended = work.endWork(prompt.at, km, savePlace)
                         if (ended == null) {
                             showMessage("Es läuft keine Arbeitszeit.")
                         } else {
@@ -330,18 +339,65 @@ class MainViewModel(
 
     fun writeBackup(context: Context, uri: Uri) {
         val resolver = context.applicationContext.contentResolver
+        val a = app ?: return
         viewModelScope.launch {
             try {
-                val data = repo.exportData().copy(
-                    driverName = settings.driverName.value,
-                    rules = settings.rules.value,
-                    workSettings = settings.work.value,
-                    mapSettings = settings.map.value,
-                )
+                val data = a.fullBackupData()
                 BackupFiles.write(resolver, uri, data)
                 showMessage("Datensicherung gespeichert (${data.days.size} Tage)")
             } catch (e: Exception) {
                 showMessage("Sicherung fehlgeschlagen: ${e.localizedMessage ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    // ---------- Automatisches Backup ----------
+
+    val autoBackup: StateFlow<AutoBackupSettings> = settings.autoBackup
+    val backupFolder: StateFlow<String?> = settings.backupFolder
+    val lastAutoBackup: StateFlow<Long> = settings.lastAutoBackup
+
+    fun setAutoBackup(value: AutoBackupSettings) {
+        settings.setAutoBackup(value)
+        app?.let { AutoBackup.schedule(it, value, settings.backupFolder.value != null) }
+    }
+
+    /** Ordner aus der Android-Ordnerauswahl übernehmen (Zugriff dauerhaft behalten). */
+    fun setBackupFolder(context: Context, uri: Uri) {
+        val resolver = context.applicationContext.contentResolver
+        try {
+            resolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        } catch (e: SecurityException) {
+            showMessage("Auf diesen Ordner ist kein dauerhafter Zugriff möglich. Bitte einen anderen wählen.")
+            return
+        }
+        // Früheren Ordner freigeben
+        settings.backupFolder.value?.takeIf { it != uri.toString() }?.let { old ->
+            runCatching {
+                resolver.releasePersistableUriPermission(
+                    Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+        }
+        settings.setBackupFolder(uri.toString())
+        app?.let { AutoBackup.schedule(it, settings.autoBackup.value, true) }
+        showMessage("Speicherort gewählt: ${SafBackupFolder.displayName(resolver, uri) ?: "Ordner"}")
+    }
+
+    /** „Jetzt sichern“: sofort in den gewählten Ordner sichern. */
+    fun backupNow() {
+        val a = app ?: return
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val name = AutoBackup.runNow(a)
+                showMessage("Gesichert: $name")
+            } catch (e: Exception) {
+                showMessage("Sicherung fehlgeschlagen: ${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                _busy.value = false
             }
         }
     }
@@ -374,6 +430,13 @@ class MainViewModel(
                 data.rules?.let { settings.setShortSingleDayAsHalf(it.shortSingleDayAsHalf) }
                 data.workSettings?.let { settings.setWorkSettings(it) }
                 data.mapSettings?.let { settings.setMapSettings(it) }
+                data.autoBackup?.let { ab ->
+                    // Der Speicherort gehört zum Gerät: ohne gewählten Ordner bleibt das Backup aus.
+                    val v = ab.copy(enabled = ab.enabled && settings.backupFolder.value != null)
+                    setAutoBackup(v)
+                }
+                // Ältere Sicherung ohne Übernachtungsplätze: frühere Plätze wie beim Update übernehmen
+                if (data.places == null) app?.let { OvernightImport.importNow(repo, it.tracks) }
                 work.onReminderSettingsChanged()
                 work.syncTracking()
                 showMessage("Datensicherung geladen: ${data.days.size} Tage")

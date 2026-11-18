@@ -35,19 +35,22 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 **`data/` – Speichern**
 | Datei | Zuständig für |
 |---|---|
-| `AppDatabase.kt` | Room-Datenbank, Version **5**, alle Migrationen (`MIGRATIONS`) |
-| `DayEntity.kt`, `TourEntity.kt`, `WorkShiftEntity.kt` | Tabellen `days`, `tours`, `work_shifts` |
+| `AppDatabase.kt` | Room-Datenbank, Version **6**, alle Migrationen (`MIGRATIONS`) |
+| `DayEntity.kt`, `TourEntity.kt`, `WorkShiftEntity.kt` | Tabellen `days` (mit `countries` = alle Länder des Tages), `tours`, `work_shifts` |
 | `TrackChunkEntity.kt` | Tabelle `track_chunks` (GPS-Strecke, Punkte als BLOB) + `TrackChunkMeta` (ohne Punkte) |
-| `StopLocationEntity.kt`, `MilestoneEntity.kt` | Tabellen `stop_locations` (Standort bei „Arbeit beenden“), `milestones` |
-| `FahrtenbuchDao.kt`, `TrackDao.kt`, `StopDao.kt` | Datenbank-Abfragen (Tage/Touren/Schichten, Strecken, Standorte/Meilensteine) |
+| `StopLocationEntity.kt`, `MilestoneEntity.kt` | Tabellen `stop_locations` (alte Standorte bis v5, werden nicht mehr angelegt), `milestones` |
+| `OvernightPlaceEntity.kt` | Tabellen `overnight_places` (Platz mit Name, Sternen, Ausstattung, Notiz) und `overnight_stays` (einzelne Übernachtungen); `OvernightPlace` |
+| `OvernightImport.kt` | einmalige Übernahme der bis v5 berechneten Übernachtungsplätze (ohne heute) nach Update/Wiederherstellen alter Sicherung |
+| `FahrtenbuchDao.kt`, `TrackDao.kt`, `StopDao.kt` | Datenbank-Abfragen (Tage/Touren/Schichten, Strecken, Standorte/Meilensteine/Übernachtungsplätze) |
 | `Converters.kt` | Datum ↔ Text für Room |
-| `Repository.kt` | gesamte Speicherlogik für Tage, Touren, Arbeitsschichten (Arbeit beginnen/beenden, km-Übernahme, Tour beenden), Export/Import aller Daten |
+| `Repository.kt` | gesamte Speicherlogik für Tage, Touren, Arbeitsschichten (Arbeit beginnen/beenden, km-Übernahme, Tour beenden), Länder per GPS/Grenzübertritt, Übernachtungsplätze, Export/Import aller Daten |
 | `RepositoryResults.kt` | Ergebnis-Typen `StartResult`, `EndTourResult` |
 | `TrackRepository.kt`, `TrackChunks.kt` | Strecken speichern/laden; Streckenstück aus Punkten bauen |
-| `Settings.kt` | Einstellungen (SharedPreferences) |
-| `BackupModels.kt` | Datenmodelle der Sicherung (`BackupData`, `WorkSettings`, `MapSettings`, `LegacyWork`) |
-| `Backup.kt` | Datensicherung als JSON, Format **5** (liest 1–4) |
+| `Settings.kt` | Einstellungen (SharedPreferences), u. a. Verbrauch, automatisches Backup (Ordner-URI, letztes Backup) |
+| `BackupModels.kt` | Datenmodelle der Sicherung (`BackupData`, `WorkSettings`, `MapSettings` mit Verbrauch, `AutoBackupSettings`, `LegacyWork`) |
+| `Backup.kt` | Datensicherung als JSON, Format **6** (liest 1–5) |
 | `BackupFiles.kt` | Sicherungsdatei lesen/schreiben (Speicherort vom Nutzer gewählt) |
+| `BackupFolder.kt` | Ordner für automatische Backups (`SafBackupFolder`: Android-Ordnerauswahl, auch Google Drive) |
 | `PreMigrationBackup.kt` | automatische Sicherung vor jeder Migration (Kopie + JSON unter Download/Fahrtenbuch) |
 | `OldDatabaseReader.kt` | liest alte Datenbanken roh per SQL (für `PreMigrationBackup`) |
 
@@ -55,6 +58,7 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | Datei | Zuständig für |
 |---|---|
 | `Classification.kt` | `Classifier`: voller/halber Tag, Firmenregel, Übernachtung im LKW |
+| `DayCountries.kt` | mehrere Länder pro Tag; zählendes Land = letztes ausländisches (Ausland hat Vorrang) |
 | `WorkSplitter.kt` | Schichten an Mitternacht teilen, km anteilig verteilen |
 | `Stats.kt`, `Period.kt` | Auswertung je Woche/Monat/Jahr |
 | `Countries.kt`, `Format.kt` | Ländernamen/Flaggen, deutsche Formatierung |
@@ -65,7 +69,8 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `geo/TrackFilter.kt` | welche GPS-Messung ein Streckenpunkt wird (30–50 m, ungenaue/Ausreißer verwerfen) |
 | `geo/TrackCodec.kt` | kompaktes Speicherformat der Punkte (Delta-Varint) |
 | `geo/Simplify.kt`, `geo/FogGeometry.kt` | Linien vereinfachen; Strecken in Detailstufen und Gruppen für den Nebel |
-| `geo/Overnights.kt` | Übernachtungsplätze bestimmen und im Umkreis 200 m zusammenfassen |
+| `geo/Overnights.kt` | alte Berechnung der Übernachtungsplätze (nur noch für `OvernightImport`), Umkreis 200 m |
+| `geo/BorderDetector.kt` | Grenzübertritt erst nach 5 Min. **und** 3 km im neuen Land |
 
 **`export/`:** `YearExport.kt` (Jahresübersicht erzeugen, `ExportFormat`), `PdfExporter.kt`, `CsvExporter.kt`
 (Excel, Semikolon, BOM), `Share.kt` (Teilen-Menü).
@@ -81,7 +86,9 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `TrackingService.kt` | Vordergrunddienst der Streckenaufzeichnung (Plattform-GPS, Benachrichtigung) |
 | `TrackRecorder.kt` | Punkte filtern und in Stücken speichern |
 | `Tracking.kt` | Aufzeichnung starten/stoppen, Berechtigungen, Akku-Optimierung |
-| `StopLocator.kt` | Position beim Arbeitsende |
+| `StopLocator.kt` | Position beim Arbeitsende (für den Übernachtungsplatz mit Haken) |
+| `BorderWatcher.kt` | Streckenpunkte → `BorderDetector` → `WorkController.onBorderCrossed` |
+| `AutoBackup.kt` | automatisches Backup: Fälligkeit, Schreiben, alte löschen, WorkManager-Auftrag (`AutoBackupWorker`, alle 6 Std. prüfen), Fehler-Benachrichtigung |
 | `ReminderScheduler.kt`, `ReminderReceiver.kt` | Erinnerung „Arbeit läuft seit 15 Std.“ |
 | `BootReceiver.kt` | nach Neustart/Update Erinnerung und Aufzeichnung wiederherstellen |
 
@@ -95,7 +102,7 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `UiModels.kt` | `ActiveTour`, `KmPrompt` |
 | `theme/Theme.kt` | Farben und Schriften |
 | `components/Common.kt` | `SectionCard`, `StatTile`, `DayTypeBadge` u. a. |
-| `components/KmDialog.kt` | km-Abfrage beim Beenden |
+| `components/KmDialog.kt` | km-Abfrage beim Beenden, bei „Arbeit beenden“ mit Haken „Übernachtungsplatz auf der Karte speichern“ |
 | `components/StartWorkFlow.kt` | „Arbeit beginnen“ mit Berechtigungs-Erklärung (inkl. „Immer erlauben“) |
 | `components/CountryPicker.kt`, `components/Pickers.kt` | Länderauswahl, Datum-/Uhrzeit-Dialoge |
 | `home/HomeScreen.kt` | Startbildschirm „Heute“ |
@@ -103,19 +110,20 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `history/HistoryScreen.kt` | Verlauf |
 | `stats/StatsScreen.kt`, `stats/StatsWidgets.kt`, `stats/Charts.kt` | Auswertung, Zeitraum-Auswahl/Auslandstabelle, Diagramme |
 | `editor/EditorScreen.kt` | Eintrag-Bildschirm (Aufbau, Dialoge) |
-| `editor/EditorSections.kt` | Abschnitte: Abwesenheit, Arbeitszeit, Land, km, fehlende Tage, Übernachtung, Einordnung, Notiz |
+| `editor/EditorSections.kt` | Abschnitte: Abwesenheit, Arbeitszeit, Länder (mehrere), km, fehlende Tage, Übernachtung, Einordnung, Notiz |
 | `editor/EditorWidgets.kt` | kleine Bausteine (Feldkarte, Zeit-Kachel, Umschalter …) |
 | `editor/EditorViewModel.kt`, `editor/EditorState.kt`, `editor/EditorRules.kt` | Zustand und Speichern; Zustands-Klassen; Eingabeprüfung |
 | `editor/ShiftDialog.kt` | Arbeitszeit bearbeiten |
 | `settings/SettingsScreen.kt` | Einstellungen (Fahrer, Sicherung, Regeln, Über), Dialoge |
-| `settings/WorkSettingsCard.kt`, `settings/MapSettingsCard.kt`, `settings/SettingsWidgets.kt` | Karten Arbeitszeit und Karte; Schalter/Berechtigungs-Hinweise |
+| `settings/WorkSettingsCard.kt`, `settings/MapSettingsCard.kt`, `settings/SettingsWidgets.kt` | Karten Arbeitszeit und Karte (inkl. Dieselverbrauch); Schalter/Berechtigungs-Hinweise |
+| `settings/AutoBackupSection.kt` | automatisches Backup im Bereich Datensicherung |
 | `map/MapScreen.kt` | Kartenansicht (Aufbau, Hinweise, Statistik, Dialoge) |
-| `map/FogMap.kt` | osmdroid-Karte mit Nebel, LKW, Übernachtungs-Symbolen und Knöpfen |
-| `map/MapViewModel.kt` | Strecken laden, `FogGeometry` bauen, Statistik, Übernachtungsplätze |
+| `map/FogMap.kt` | osmdroid-Karte mit Nebel, LKW, Übernachtungs-Symbolen (mit Sternen), Knöpfen und „Versetzen“-Modus |
+| `map/MapViewModel.kt` | Strecken laden, `FogGeometry` bauen, Statistik (inkl. Liter Diesel aus Tacho-km), Übernachtungsplätze bearbeiten |
 | `map/FogRenderer.kt`, `map/FogOverlay.kt` | Nebel zeichnen (unabhängig von osmdroid) bzw. als osmdroid-Ebene |
 | `map/MapIcons.kt` | LKW- und Mond-Symbol |
-| `map/MapWidgets.kt` | Aufzeichnungs-Anzeige, Hinweiskarte, OSM-Namensnennung, Statistik-Kacheln |
-| `map/MilestonesSheet.kt`, `map/MilestoneCelebration.kt`, `map/OvernightDialog.kt` | Meilenstein-Übersicht, Meldung mit Animation, Übernachtungs-Dialog |
+| `map/MapWidgets.kt` | Aufzeichnungs-Anzeige, Hinweiskarte, OSM-Namensnennung, drei Statistik-Kacheln |
+| `map/MilestonesSheet.kt`, `map/MilestoneCelebration.kt`, `map/OvernightSheet.kt` | Meilenstein-Übersicht, Meldung mit Animation, Übernachtungsplatz (Umbenennen, Versetzen, Löschen, Notizen, einzelne Übernachtungen) |
 | `map/TrackingPermissions.kt` | Berechtigungs-Stand und -Texte der Aufzeichnung |
 | `map/MapConfig.kt` | osmdroid: User-Agent, Kachel-Zwischenspeicher |
 
@@ -123,7 +131,8 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 
 - **Einstieg:** `FahrtenbuchApp.onCreate` erzeugt alles von Hand (keine DI): zuerst
   `PreMigrationBackup.runIfNeeded`, dann `AppDatabase`, `Repository`, `TrackRepository`,
-  `LocationProvider`, `ReminderScheduler`, `Tracking`, `WorkController`, `MapConfig.init`.
+  `LocationProvider`, `ReminderScheduler`, `Tracking`, `WorkController`, `MapConfig.init`,
+  `AutoBackup.schedule`. `MainViewModel.onForeground` stößt einmalig `OvernightImport` an.
   ViewModels holen sich diese Objekte über ihre `Factory` aus der App.
 - **Arbeitszeit ist der zentrale Auslöser:** Alle Wege zu „Arbeit beginnen/beenden“ und „Tour beenden“
   (Startbildschirm, Benachrichtigung, Editor) laufen über `WorkController`. Er plant die Erinnerung,
@@ -136,10 +145,17 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 - **Karte:** `TrackingService` → `TrackRecorder` (Filter `TrackFilter`, Stücke à 500 Punkte, jedes Folgestück
   beginnt mit dem letzten Punkt des vorigen) → `track_chunks`. `MapViewModel` beobachtet nur die Metadaten,
   dekodiert geänderte Stücke neu und baut `FogGeometry`; `FogOverlay`/`FogRenderer` zeichnen den Nebel.
-  Übernachtungsplätze = Übernachtungstage + `stop_locations` (sonst letzter GPS-Punkt des Tages).
+  Übernachtungsplätze sind **fest gespeichert** (`overnight_places`/`overnight_stays`) und entstehen nur bei
+  „Arbeit beenden“ mit Haken (`WorkController.endWork(savePlace = true)`); im Umkreis 200 m → bestehender Platz.
+  Unabhängig von der Steuer-Zählung `ClassifiedDay.overnight`.
+- **Länder:** `days.countryCode` = zählendes Land, `days.countries` = Reihenfolge aller Länder. Während der
+  Arbeitszeit: `TrackingService` → `BorderWatcher` → `WorkController.onBorderCrossed` →
+  `Repository.recordBorderCrossing` (nicht bei `countryManual`).
 - **Meilensteine:** `MilestoneState` (im `MainViewModel`) berechnet sie laufend aus Tagen und Strecken
   (`MilestoneInputs` → `Milestones.evaluate`), `MilestoneTracker` speichert neue in `milestones` und
   entscheidet, ob eine Meldung erscheint.
+- **Automatisches Backup:** gleiche Daten wie manuell (`FahrtenbuchApp.fullBackupData`), Ordner per
+  `OpenDocumentTree` mit dauerhafter Berechtigung; Dateien `Fahrtenbuch-Auto-<Datum>_<Zeit>.json`.
 - **Datensicherung:** Neue Tabellen/Felder müssen an drei Stellen ergänzt werden: `Backup` (JSON hin und
   zurück, Modelle in `BackupModels`), `Repository.exportData`/`replaceAll` und `OldDatabaseReader`
   (liest alte Datenbanken roh per SQL, Tabellen/Spalten jeweils optional).
@@ -207,6 +223,12 @@ Hinweise für die Cloud-Umgebung:
   Kopf der Skripte); die Ergebnisdateien sind eingecheckt.
 
 ## Zuletzt geändert
+
+- **Übernachtungsplätze fest + bearbeitbar, Land automatisch, Diesel, automatisches Backup (DB v6, Backup 6):**
+  Mond-Punkt wandert nicht mehr mit; Platz nur per Haken beim „Arbeit beenden“; Umbenennen, Versetzen,
+  Löschen, Notizen (Sterne, Ausstattung, Freitext), einzelne Übernachtungen löschbar; mehrere Länder pro Tag
+  (Ausland hat Vorrang), Grenzerkennung offline; Kachel „Liter Diesel“ (Standard 27 l/100 km);
+  automatisches Backup per WorkManager (neue Abhängigkeit `androidx.work`).
 
 - **Aufteilung in kleinere Dateien (ohne Funktionsänderung):** Entitäten je Datei, Sicherungs-Modelle,
   Export und Datei-Ein-/Ausgabe aus dem `MainViewModel` herausgelöst (`YearExport`, `BackupFiles`,

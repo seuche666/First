@@ -4,13 +4,17 @@ import androidx.room.withTransaction
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.Classifier
 import de.fernfahrer.fahrtenbuch.domain.CountingRules
+import de.fernfahrer.fahrtenbuch.domain.DayCountries
 import de.fernfahrer.fahrtenbuch.domain.KmShare
 import de.fernfahrer.fahrtenbuch.domain.Stats
 import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
+import de.fernfahrer.fahrtenbuch.domain.geo.Geo
+import de.fernfahrer.fahrtenbuch.domain.geo.Overnights
 import java.time.LocalDate
 import java.time.LocalDateTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 
 class Repository(
     private val db: AppDatabase,
@@ -24,6 +28,9 @@ class Repository(
         combine(dao.observeDays(), dao.observeTours(), rules) { days, tours, r ->
             Classifier.classifyAll(days, tours, r)
         }
+
+    /** Alle Tage mit Einordnung, einmalig gelesen. */
+    suspend fun classifiedDaysNow(): List<ClassifiedDay> = classifiedDays.first()
 
     val tours: Flow<List<TourEntity>> = dao.observeTours()
 
@@ -88,7 +95,7 @@ class Repository(
                     date = date,
                     startMinute = 0,
                     endMinute = 24 * 60,
-                    countryCode = previous?.countryCode ?: Stats.HOME_COUNTRY,
+                    countryCode = previous?.lastCountry ?: Stats.HOME_COUNTRY,
                     note = "Automatisch ergänzt",
                     tourId = tourId,
                 ),
@@ -139,7 +146,7 @@ class Repository(
      * - während einer laufenden Tour: Tourtag 00:00–24:00 (fehlende Tourtage werden ergänzt)
      * - sonst: Abwesenheit ab [workStartMinute] (oder 00:00, wenn die Arbeit schon seit dem Vortag
      *   läuft) bis 24:00 als automatischer Vorschlag
-     * Land wie am Vortag (nicht von Hand gewählt, damit GPS es verbessern darf). Der Start-km wird
+     * Land wie am Ende des Vortags (nicht von Hand gewählt, damit GPS es verbessern darf). Der Start-km wird
      * nur bei Arbeitsbeginn vorbelegt; Tage mitten in einer Schicht erhalten ihre km beim Arbeitsende.
      */
     private suspend fun ensureDay(date: LocalDate, workStartMinute: Int?): Pair<DayEntity, Boolean> {
@@ -153,7 +160,8 @@ class Repository(
             date = date,
             startMinute = if (inTour) 0 else (workStartMinute ?: 0),
             endMinute = 24 * 60,
-            countryCode = previous?.countryCode ?: Stats.HOME_COUNTRY,
+            // Land, in dem man am Ende des Vortags war
+            countryCode = previous?.lastCountry ?: Stats.HOME_COUNTRY,
             countryManual = false,
             kmStart = if (workStartMinute != null) lastKnownKm() else null,
             tourId = if (inTour) tour!!.id else null,
@@ -308,14 +316,35 @@ class Repository(
 
     /**
      * Übernimmt ein per GPS ermitteltes Land für [date] – aber nur, wenn das Land dort nicht von
-     * Hand gewählt wurde. Gibt true zurück, wenn das Land jetzt [code] ist.
+     * Hand gewählt wurde. Gibt true zurück, wenn das Land neu eingetragen wurde.
+     *
+     * @param replaceSingle bei Arbeitsbeginn: Steht für den Tag bisher nur ein (vom Vortag
+     *   übernommenes) Land, wird es ersetzt statt ergänzt.
      */
-    suspend fun applyDetectedCountry(date: LocalDate, code: String): Boolean = db.withTransaction {
-        val day = dao.getDayByDate(date) ?: return@withTransaction false
-        if (day.countryManual) return@withTransaction false
-        if (day.countryCode != code) dao.updateDay(day.copy(countryCode = code))
-        true
+    suspend fun applyDetectedCountry(date: LocalDate, code: String, replaceSingle: Boolean = false): Boolean =
+        db.withTransaction {
+            val day = dao.getDayByDate(date) ?: return@withTransaction false
+            if (day.countryManual) return@withTransaction false
+            val route = day.countryRoute
+            val newRoute = if (replaceSingle && route.size == 1) listOf(code) else DayCountries.withVisit(route, code)
+            if (newRoute == route) return@withTransaction false
+            dao.updateDay(day.withCountries(newRoute))
+            true
+        }
+
+    /**
+     * Grenzübertritt während der Arbeitszeit: [code] wird als weiteres Land des Tages eingetragen
+     * (Einträge für neu begonnene Tage einer laufenden Schicht werden vorher angelegt). Ein von Hand
+     * gewähltes Land bleibt unverändert. Gibt true zurück, wenn sich etwas geändert hat.
+     */
+    suspend fun recordBorderCrossing(at: LocalDateTime, code: String): Boolean = db.withTransaction {
+        syncRunningWork(at)
+        applyDetectedCountry(at.toLocalDate(), code)
     }
+
+    /** Land, in dem man zuletzt war (Ende des jüngsten Tages bis [date]). */
+    suspend fun lastCountryUpTo(date: LocalDate): String? =
+        (dao.getDayByDate(date) ?: dao.getDayBefore(date))?.lastCountry
 
     // ---------------------------------------------------------------------------------------------
     // Datensicherung
@@ -323,21 +352,84 @@ class Repository(
 
     // ---------- Standorte beim Arbeitsende, Meilensteine ----------
 
+    /** Standorte beim Arbeitsende aus Version 5 (werden nicht mehr neu angelegt, bleiben aber erhalten). */
     val stops: Flow<List<StopLocationEntity>> = db.stopDao().observeStops()
-    suspend fun addStop(stop: StopLocationEntity): Long = db.stopDao().insertStop(stop)
+    suspend fun getStops(): List<StopLocationEntity> = db.stopDao().getAllStops()
 
     val milestones: Flow<List<MilestoneEntity>> = db.stopDao().observeMilestones()
     suspend fun getMilestones(): List<MilestoneEntity> = db.stopDao().getAllMilestones()
     suspend fun addMilestones(list: List<MilestoneEntity>) = db.stopDao().insertMilestones(list)
 
+    // ---------- Übernachtungsplätze ----------
+
+    private val stopDao = db.stopDao()
+
+    /** Alle Übernachtungsplätze mit ihren Übernachtungen. */
+    val overnightPlaces: Flow<List<OvernightPlace>> =
+        combine(stopDao.observePlaces(), stopDao.observeStays()) { places, stays -> group(places, stays) }
+
+    suspend fun getOvernightPlaces(): List<OvernightPlace> = group(stopDao.getAllPlaces(), stopDao.getAllStays())
+
+    private fun group(places: List<OvernightPlaceEntity>, stays: List<OvernightStayEntity>): List<OvernightPlace> {
+        val byPlace = stays.groupBy { it.placeId }
+        return places.map { OvernightPlace(it, byPlace[it.id].orEmpty()) }
+    }
+
+    /**
+     * Speichert eine Übernachtung an der Position ([latE5], [lonE5]). Liegt im Umkreis von
+     * [Overnights.CLUSTER_RADIUS_M] schon ein Platz, wird sie dem nächstgelegenen zugeordnet
+     * (Name, Notizen und Position des Platzes bleiben), sonst entsteht ein neuer Platz.
+     * Gibt den Platz zurück.
+     */
+    suspend fun addOvernightStay(
+        date: LocalDate, minute: Int, latE5: Int, lonE5: Int, countryCode: String?,
+    ): OvernightPlaceEntity = db.withTransaction {
+        val lat = latE5 / 100_000.0
+        val lon = lonE5 / 100_000.0
+        val near = stopDao.getAllPlaces()
+            .map { it to Geo.distanceM(it.lat, it.lon, lat, lon) }
+            .filter { it.second <= Overnights.CLUSTER_RADIUS_M }
+            .minByOrNull { it.second }?.first
+        val place = near ?: OvernightPlaceEntity(latE5 = latE5, lonE5 = lonE5, countryCode = countryCode)
+            .let { it.copy(id = stopDao.insertPlace(it)) }
+        stopDao.insertStay(OvernightStayEntity(placeId = place.id, date = date, minute = minute, latE5 = latE5, lonE5 = lonE5))
+        place
+    }
+
+    /** Name, Notizen oder Position eines Platzes ändern. */
+    suspend fun updateOvernightPlace(place: OvernightPlaceEntity) = stopDao.updatePlace(place)
+
+    /** Löscht einen Platz mit allen Übernachtungen dort (nur Karte, nicht die Steuer-Zählung). */
+    suspend fun deleteOvernightPlace(id: Long) = db.withTransaction {
+        for (stay in stopDao.getStaysOfPlace(id)) stopDao.deleteStay(stay.id)
+        stopDao.deletePlace(id)
+    }
+
+    /** Löscht eine einzelne Übernachtung; war es die letzte des Platzes, verschwindet der Platz. */
+    suspend fun deleteOvernightStay(id: Long) = db.withTransaction {
+        val stay = stopDao.getStay(id) ?: return@withTransaction
+        stopDao.deleteStay(id)
+        if (stopDao.getStaysOfPlace(stay.placeId).isEmpty()) stopDao.deletePlace(stay.placeId)
+    }
+
+    suspend fun hasOvernightPlaces(): Boolean = stopDao.countPlaces() > 0
+
+    /** Plätze einfügen (z. B. Übernahme der früher berechneten Plätze); neue IDs werden vergeben. */
+    suspend fun insertOvernightPlaces(list: List<OvernightPlace>) = db.withTransaction {
+        for (p in list) {
+            val id = stopDao.insertPlace(p.place.copy(id = 0))
+            stopDao.insertStays(p.stays.map { it.copy(id = 0, placeId = id) })
+        }
+    }
+
     suspend fun exportData(): BackupData = BackupData(
         dao.getAllTours(), dao.getAllDays(), shifts = dao.getAllShifts(), tracks = db.trackDao().getAllChunks(),
-        stops = db.stopDao().getAllStops(), milestones = db.stopDao().getAllMilestones(),
+        stops = stopDao.getAllStops(), milestones = stopDao.getAllMilestones(), places = getOvernightPlaces(),
     )
 
     /**
-     * Ersetzt alle Daten durch eine Sicherung. Enthält die Sicherung keine Strecken, Standorte oder
-     * Meilensteine (ältere Formate), bleiben die vorhandenen erhalten.
+     * Ersetzt alle Daten durch eine Sicherung. Enthält die Sicherung keine Strecken, Standorte,
+     * Meilensteine oder Übernachtungsplätze (ältere Formate), bleiben die vorhandenen erhalten.
      */
     suspend fun replaceAll(data: BackupData) = db.withTransaction {
         dao.deleteAllShifts()
@@ -351,12 +443,18 @@ class Repository(
             tracks.chunked(200).forEach { db.trackDao().insertAll(it) }
         }
         data.stops?.let {
-            db.stopDao().deleteAllStops()
-            db.stopDao().insertStops(it)
+            stopDao.deleteAllStops()
+            stopDao.insertStops(it)
         }
         data.milestones?.let {
-            db.stopDao().deleteAllMilestones()
-            db.stopDao().insertMilestones(it)
+            stopDao.deleteAllMilestones()
+            stopDao.insertMilestones(it)
+        }
+        data.places?.let { places ->
+            stopDao.deleteAllStays()
+            stopDao.deleteAllPlaces()
+            stopDao.insertPlaces(places.map { it.place })
+            stopDao.insertStays(places.flatMap { it.stays })
         }
     }
 }

@@ -35,6 +35,10 @@ object Format {
     fun number(n: Int): String = numberFmt.format(n)
     fun km(n: Int): String = "${number(n)} km"
 
+    /** Kommazahl auf Deutsch ohne unnötige Nachkommastellen, z. B. 27 oder 27,5. */
+    fun decimal(v: Double): String =
+        if (v == Math.floor(v)) v.toLong().toString() else "%.1f".format(de, v)
+
     fun nowMinutes(roundTo: Int = 5): Int {
         val now = LocalTime.now()
         val m = now.hour * 60 + now.minute

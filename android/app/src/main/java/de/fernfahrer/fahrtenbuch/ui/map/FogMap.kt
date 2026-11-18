@@ -1,7 +1,14 @@
 package de.fernfahrer.fahrtenbuch.ui.map
 
 import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,7 +41,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import de.fernfahrer.fahrtenbuch.domain.geo.FogGeometry
 import de.fernfahrer.fahrtenbuch.domain.geo.Geo
-import de.fernfahrer.fahrtenbuch.domain.geo.Overnights
+import de.fernfahrer.fahrtenbuch.data.OvernightPlace
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -57,12 +64,16 @@ internal fun FogMap(
     hasLocation: Boolean,
     onNeedLocation: () -> Unit,
     onMessage: (String) -> Unit,
-    overnights: List<Overnights.Cluster>,
+    overnights: List<OvernightPlace>,
     showOvernights: Boolean,
     onToggleOvernights: () -> Unit,
-    onClusterClick: (Overnights.Cluster) -> Unit,
+    onPlaceClick: (OvernightPlace) -> Unit,
     onOpenMilestones: () -> Unit,
     achievedMilestones: Int,
+    /** Platz, der gerade versetzt wird (Karte unter dem Symbol verschieben), sonst null. */
+    moving: OvernightPlace? = null,
+    onMoveDone: (lat: Double, lon: Double) -> Unit = { _, _ -> },
+    onMoveCancel: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -84,7 +95,7 @@ internal fun FogMap(
     }
     // Übernachtungsplätze über dem Nebel, darunter nichts verdeckt
     val nightLayer = remember { FolderOverlay().also { mapView.overlays.add(it) } }
-    val clickHandler = rememberUpdatedState(onClusterClick)
+    val clickHandler = rememberUpdatedState(onPlaceClick)
     val myLocation = remember {
         MyLocationNewOverlay(GpsMyLocationProvider(context), mapView).apply {
             isDrawAccuracyEnabled = true
@@ -97,23 +108,30 @@ internal fun FogMap(
             mapView.overlays.add(this)
         }
     }
-    LaunchedEffect(overnights) {
+    val movingId = moving?.place?.id
+    LaunchedEffect(overnights, movingId) {
         nightLayer.items.clear()
-        for (cluster in overnights) {
+        for (p in overnights) {
+            if (p.place.id == movingId) continue
             nightLayer.add(
                 Marker(mapView).apply {
-                    position = GeoPoint(cluster.lat, cluster.lon)
-                    icon = BitmapDrawable(context.resources, MapIcons.overnight(density, cluster.count))
+                    position = GeoPoint(p.place.lat, p.place.lon)
+                    icon = BitmapDrawable(context.resources, MapIcons.overnight(density, p.count, p.place.rating))
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     setInfoWindow(null)
                     setOnMarkerClickListener { _, _ ->
-                        clickHandler.value(cluster)
+                        if (movingId == null) clickHandler.value(p)
                         true
                     }
                 },
             )
         }
         mapView.invalidate()
+    }
+    // Versetzen: Platz in die Mitte holen und nah heranzoomen
+    LaunchedEffect(movingId) {
+        val p = moving ?: return@LaunchedEffect
+        mapView.controller.animateTo(GeoPoint(p.place.lat, p.place.lon), maxOf(mapView.zoomLevelDouble, 17.0), 600L)
     }
 
     // Startansicht: zuletzt gesehener Ausschnitt, sonst alle Strecken, sonst Europa
@@ -181,6 +199,18 @@ internal fun FogMap(
                 it.invalidate()
             },
         )
+        if (moving != null) {
+            MovePlaceOverlay(
+                place = moving,
+                density = density,
+                onSave = {
+                    val c = mapView.mapCenter
+                    onMoveDone(c.latitude, c.longitude)
+                },
+                onCancel = onMoveCancel,
+            )
+            return@Box
+        }
         Column(
             Modifier.align(Alignment.BottomEnd).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -223,5 +253,39 @@ internal fun FogMap(
                 Icon(Icons.Rounded.MyLocation, contentDescription = "Mein Standort")
             }
         }
+    }
+}
+
+/** Versetzen eines Platzes: Symbol fest in der Mitte, Karte darunter verschieben, dann bestätigen. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.MovePlaceOverlay(
+    place: OvernightPlace,
+    density: Float,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val icon = remember(place.place.id) { MapIcons.overnight(density, place.count, place.place.rating).asImageBitmap() }
+    Image(icon, contentDescription = "Neue Position", modifier = Modifier.align(Alignment.Center))
+    Surface(
+        modifier = Modifier.align(Alignment.TopCenter).padding(12.dp),
+        shape = MaterialTheme.shapes.large,
+        tonalElevation = 3.dp,
+        shadowElevation = 4.dp,
+    ) {
+        Text(
+            "Platz versetzen: Karte mit dem Finger ziehen, bis das Symbol an der richtigen Stelle ist.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        )
+    }
+    Row(
+        Modifier.align(Alignment.BottomCenter).padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedButton(
+            onClick = onCancel,
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) { Text("Abbrechen") }
+        Button(onClick = onSave) { Text("Hier speichern") }
     }
 }

@@ -38,7 +38,9 @@ class MapIconsTest {
     fun uebernachtungSymbolMitAnzahl() {
         val single = MapIcons.overnight(2f, 1)
         val many = MapIcons.overnight(2f, 7)
-        assertTrue("Abzeichen mit Anzahl macht das Symbol größer", many.width > single.width)
+        assertTrue("Abzeichen mit Anzahl macht das Symbol größer", many.width > single.width && many.height > single.height)
         assertEquals(255, Color.alpha(single.getPixel(single.width / 2, single.height / 2 + 12)))
+        // Kreis bleibt auch mit Abzeichen genau in der Mitte
+        assertEquals(255, Color.alpha(many.getPixel(many.width / 2, many.height / 2)))
     }
 }

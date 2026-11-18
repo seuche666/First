@@ -15,7 +15,15 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.KeyboardType
+import de.fernfahrer.fahrtenbuch.domain.Format
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.fernfahrer.fahrtenbuch.data.MapSettings
@@ -70,6 +78,8 @@ internal fun MapSettingsCard(
             }
         }
         Spacer(Modifier.height(14.dp))
+        FuelField(map.fuelPer100Km) { onChange(map.copy(fuelPer100Km = it)) }
+        Spacer(Modifier.height(14.dp))
         OutlinedButton(onClick = onDeleteTracks, modifier = Modifier.fillMaxWidth().height(48.dp)) {
             Icon(Icons.Rounded.DeleteForever, null)
             Spacer(Modifier.width(8.dp))
@@ -84,4 +94,33 @@ internal fun MapSettingsCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** Dieselverbrauch für die Kachel „Liter Diesel“ (aus den eingetragenen Tacho-km). */
+@Composable
+private fun FuelField(value: Double, onChange: (Double) -> Unit) {
+    var text by remember { mutableStateOf(Format.decimal(value)) }
+    val parsed = text.replace(',', '.').toDoubleOrNull()
+    val valid = parsed != null && parsed in MapSettings.MIN_FUEL..MapSettings.MAX_FUEL
+    OutlinedTextField(
+        value = text,
+        onValueChange = { t ->
+            text = t.filter { it.isDigit() || it == ',' || it == '.' }.take(5)
+            text.replace(',', '.').toDoubleOrNull()
+                ?.takeIf { it in MapSettings.MIN_FUEL..MapSettings.MAX_FUEL }
+                ?.let(onChange)
+        },
+        label = { Text("Dieselverbrauch") },
+        suffix = { Text("l / 100 km") },
+        singleLine = true,
+        isError = !valid,
+        supportingText = {
+            Text(
+                if (valid) "Für die Kachel „Liter Diesel“ unter der Karte, berechnet aus den eingetragenen Kilometerständen."
+                else "Bitte einen Wert zwischen 1 und 100 eingeben.",
+            )
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

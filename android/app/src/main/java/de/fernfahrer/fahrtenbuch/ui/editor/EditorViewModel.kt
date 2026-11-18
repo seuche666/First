@@ -14,6 +14,7 @@ import de.fernfahrer.fahrtenbuch.data.StartResult
 import de.fernfahrer.fahrtenbuch.data.WorkShiftEntity
 import de.fernfahrer.fahrtenbuch.domain.Classifier
 import de.fernfahrer.fahrtenbuch.domain.CountingRules
+import de.fernfahrer.fahrtenbuch.domain.DayCountries
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.Stats
@@ -91,7 +92,7 @@ class EditorViewModel(
                 date = existing.date,
                 startMinute = existing.startMinute,
                 endMinute = existing.endMinute,
-                countryCode = existing.countryCode,
+                countries = existing.countryRoute,
                 countryManual = existing.countryManual,
                 kmStart = existing.kmStart?.toString().orEmpty(),
                 kmEnd = existing.kmEnd?.toString().orEmpty(),
@@ -109,7 +110,7 @@ class EditorViewModel(
                 while (repo.getDayByDate(date) != null && date.isAfter(today.minusDays(366))) date = date.minusDays(1)
             }
             val previous = repo.getDayBefore(date)
-            val country = previous?.countryCode ?: Stats.HOME_COUNTRY
+            val country = listOf(previous?.lastCountry ?: Stats.HOME_COUNTRY)
             // Start-km automatisch vom letzten bekannten km-Stand
             val km = repo.lastKnownKm()?.toString().orEmpty()
             s = when (mode) {
@@ -119,18 +120,18 @@ class EditorViewModel(
                         loading = false, mode = mode, date = date,
                         startMinute = usual?.startMinute ?: (6 * 60),
                         endMinute = usual?.endMinute?.takeIf { it < MIDNIGHT } ?: (18 * 60),
-                        countryCode = country, kmStart = km,
+                        countries = country, kmStart = km,
                     )
                 }
                 EditorMode.TOUR_START -> EditorState(
                     loading = false, mode = mode, date = today,
                     startMinute = Format.nowMinutes(roundTo = 1), endMinute = MIDNIGHT,
-                    countryCode = country, kmStart = km,
+                    countries = country, kmStart = km,
                 )
                 EditorMode.TOUR_DAY -> EditorState(
                     loading = false, mode = mode, date = today,
                     startMinute = 0, endMinute = MIDNIGHT,
-                    countryCode = country, kmStart = km, tourId = active?.id,
+                    countries = country, kmStart = km, tourId = active?.id,
                 )
             }
         }
@@ -198,6 +199,7 @@ class EditorViewModel(
             startMinute = startMinute,
             endMinute = endMinute,
             countryCode = countryCode,
+            countries = DayCountries.join(countries),
             kmStart = kmS,
             kmEnd = kmE,
             note = note.trim(),
@@ -238,8 +240,25 @@ class EditorViewModel(
         it.copy(endMinute = if (on) MIDNIGHT else if (it.endMinute == MIDNIGHT) 18 * 60 else it.endMinute)
     }
 
-    /** Land von Hand gewählt – hat Vorrang vor der GPS-Erkennung. */
-    fun setCountry(code: String) = edit { it.copy(countryCode = code, countryManual = true) }
+    /**
+     * Land von Hand gewählt – hat Vorrang vor der GPS-Erkennung. [index] = welches der angezeigten
+     * Länder ersetzt wird; null = weiteres Land hinzufügen.
+     */
+    fun setCountry(index: Int?, code: String) = edit {
+        val shown = it.shownCountries
+        val list = when {
+            index == null -> if (code in shown) shown else shown + code
+            index in shown.indices -> shown.toMutableList().also { l -> l[index] = code }.distinct()
+            else -> shown
+        }
+        it.copy(countries = list, countryManual = true)
+    }
+
+    /** Ein Land des Tages entfernen (mindestens eins bleibt). */
+    fun removeCountry(code: String) = edit {
+        val list = it.shownCountries - code
+        if (list.isEmpty()) it else it.copy(countries = list, countryManual = true)
+    }
     fun setKmStart(text: String) = edit { it.copy(kmStart = text.filter(Char::isDigit).take(7)) }
     fun setKmEnd(text: String) = edit { it.copy(kmEnd = text.filter(Char::isDigit).take(7)) }
     fun setNote(text: String) = edit { it.copy(note = text.take(500)) }

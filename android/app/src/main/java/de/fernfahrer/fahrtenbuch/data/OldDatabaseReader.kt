@@ -48,6 +48,7 @@ object OldDatabaseReader {
                                 overnightOverride = c.int("overnightOverride")?.let { it != 0 },
                                 kmInterpolated = c.int("kmInterpolated")?.let { it != 0 } ?: false,
                                 timesAuto = c.int("timesAuto")?.let { it != 0 } ?: false,
+                                countries = c.string("countries").orEmpty(),
                             ),
                         )
                     }
@@ -131,7 +132,51 @@ object OldDatabaseReader {
             } else {
                 null
             }
-            BackupData(tours, days, driverName, rules, shifts, tracks = tracks, stops = stops, milestones = milestones)
+            val places: List<OvernightPlace>? = if (hasTable("overnight_places") && hasTable("overnight_stays")) {
+                val stays = db.rawQuery("SELECT * FROM overnight_stays ORDER BY date, minute", null).use { c ->
+                    buildList<OvernightStayEntity> {
+                        while (c.moveToNext()) {
+                            add(
+                                OvernightStayEntity(
+                                    id = c.long("id")!!,
+                                    placeId = c.long("placeId")!!,
+                                    date = LocalDate.parse(c.string("date")),
+                                    minute = c.int("minute") ?: 0,
+                                    latE5 = c.int("latE5") ?: 0,
+                                    lonE5 = c.int("lonE5") ?: 0,
+                                ),
+                            )
+                        }
+                    }
+                }.groupBy { it.placeId }
+                db.rawQuery("SELECT * FROM overnight_places ORDER BY id", null).use { c ->
+                    buildList<OvernightPlace> {
+                        while (c.moveToNext()) {
+                            val place = OvernightPlaceEntity(
+                                id = c.long("id")!!,
+                                latE5 = c.int("latE5")!!,
+                                lonE5 = c.int("lonE5")!!,
+                                countryCode = c.string("countryCode"),
+                                name = c.string("name").orEmpty(),
+                                rating = c.int("rating") ?: 0,
+                                shower = (c.int("shower") ?: 0) != 0,
+                                toilet = (c.int("toilet") ?: 0) != 0,
+                                food = (c.int("food") ?: 0) != 0,
+                                secure = (c.int("secure") ?: 0) != 0,
+                                quiet = (c.int("quiet") ?: 0) != 0,
+                                note = c.string("note").orEmpty(),
+                            )
+                            add(OvernightPlace(place, stays[place.id].orEmpty()))
+                        }
+                    }
+                }
+            } else {
+                null
+            }
+            BackupData(
+                tours, days, driverName, rules, shifts, tracks = tracks, stops = stops, milestones = milestones,
+                places = places,
+            )
         }
 
     private fun Cursor.index(name: String) = getColumnIndex(name).takeIf { it >= 0 && !isNull(it) }

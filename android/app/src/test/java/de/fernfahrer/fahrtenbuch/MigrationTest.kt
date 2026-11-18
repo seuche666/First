@@ -185,10 +185,110 @@ class MigrationTest {
                 assertEquals("AT", stops.getAllStops().single().countryCode)
                 assertEquals("km_1000", stops.getAllMilestones().single().id)
             }
-            assertEquals(5, room.openHelper.readableDatabase.version)
+            assertEquals(AppDatabase.VERSION, room.openHelper.readableDatabase.version)
         } finally {
             room.close()
         }
+    }
+
+    /** Datenbank im Stand von App-Version 1.0.12 (Datenbank-Version 5) mit Einträgen, Strecke, Standorten. */
+    private fun SQLiteDatabase.fillVersion5() {
+        fillVersion4()
+        execSQL(
+            "INSERT INTO stop_locations (id, date, minute, latE5, lonE5, countryCode) VALUES " +
+                "(1, '2026-11-09', 1200, 4810000, 1150000, 'DE'), " +
+                "(2, '2026-11-10', 1230, 4820000, 1637000, 'AT'), " +
+                "(3, '2026-11-11', 900, 4540000, 1100000, 'IT')",
+        )
+        execSQL("INSERT INTO milestones (id, achievedOn) VALUES ('km_1000', '2026-11-10')")
+    }
+
+    @Test
+    fun updateVonVersion5Auf6BehaeltAlleEintraegeUndUebernimmtUebernachtungsplaetze() {
+        createDatabase(dbName, 5) { fillVersion5() }
+        val room = openWithRoom(dbName)
+        try {
+            runBlocking {
+                val days = room.dao().getAllDays()
+                assertEquals(3, days.size)
+                val wien = days.first { it.id == 2L }
+                assertEquals("Wien", wien.note)
+                assertEquals("AT", wien.countryCode)
+                assertEquals("", wien.countries)
+                assertEquals(listOf("AT"), wien.countryRoute)
+                assertEquals(true, wien.overnightOverride)
+                assertEquals(2, room.dao().getAllShifts().size)
+                assertEquals(2L, room.dao().getRunningShift()?.id)
+                assertEquals(50, room.trackDao().getAllChunks().single().pointCount)
+                assertEquals(3, room.stopDao().getAllStops().size)
+                assertEquals("km_1000", room.stopDao().getAllMilestones().single().id)
+                // Neue Tabellen sind zunächst leer
+                assertTrue(room.stopDao().getAllPlaces().isEmpty())
+
+                // Einmalige Übernahme der bisher berechneten Plätze: Übernachtungstage 9. und 10.11.
+                // (am 11.11. keine Übernachtung) – Positionen aus den Standorten beim Arbeitsende
+                val repo = de.fernfahrer.fahrtenbuch.data.Repository(room, kotlinx.coroutines.flow.flowOf(CountingRules()))
+                val tracks = de.fernfahrer.fahrtenbuch.data.TrackRepository(room)
+                de.fernfahrer.fahrtenbuch.data.OvernightImport.importNow(repo, tracks, today = LocalDate.parse("2026-11-18"))
+                val places = repo.getOvernightPlaces().sortedBy { it.place.lonE5 }
+                assertEquals(2, places.size)
+                assertEquals(4_810_000 to 1_150_000, places[0].place.latE5 to places[0].place.lonE5)
+                assertEquals(LocalDate.parse("2026-11-09"), places[0].stays.single().date)
+                assertEquals("AT", places[1].place.countryCode)
+                assertEquals(LocalDate.parse("2026-11-10"), places[1].stays.single().date)
+                // Zweiter Aufruf legt nichts doppelt an
+                de.fernfahrer.fahrtenbuch.data.OvernightImport.importNow(repo, tracks, today = LocalDate.parse("2026-11-18"))
+                assertEquals(2, repo.getOvernightPlaces().size)
+
+                // Neue Felder lassen sich speichern
+                repo.updateOvernightPlace(places[1].place.copy(name = "Rastplatz Wien", rating = 5, shower = true, note = "ab 18 Uhr voll"))
+                assertEquals("Rastplatz Wien", repo.getOvernightPlaces().first { it.place.id == places[1].place.id }.place.name)
+                room.dao().updateDay(wien.withCountries(listOf("DE", "AT", "DE")))
+                val updated = room.dao().getAllDays().first { it.id == 2L }
+                assertEquals("DE,AT,DE", updated.countries)
+                assertEquals("AT", updated.countryCode)
+            }
+            assertEquals(6, room.openHelper.readableDatabase.version)
+        } finally {
+            room.close()
+        }
+    }
+
+    /** Gegenprobe: Ohne die Migration 5 → 6 lässt Room die Datenbank nicht öffnen (und löscht nichts). */
+    @Test
+    fun ohneMigration5Auf6SchlaegtDasOeffnenFehl() {
+        createDatabase(dbName, 5) { fillVersion5() }
+        val room = openWithRoom(
+            dbName, arrayOf(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5),
+        )
+        try {
+            val error = runCatching { runBlocking { room.dao().getAllDays() } }.exceptionOrNull()
+            assertTrue("Ohne Migration muss das Öffnen fehlschlagen", error is IllegalStateException)
+        } finally {
+            room.close()
+        }
+        SQLiteDatabase.openDatabase(context.getDatabasePath(dbName).path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            assertEquals(5, db.version)
+            db.rawQuery("SELECT COUNT(*) FROM days", null).use { c -> c.moveToFirst(); assertEquals(3, c.getInt(0)) }
+            db.rawQuery("SELECT COUNT(*) FROM stop_locations", null).use { c -> c.moveToFirst(); assertEquals(3, c.getInt(0)) }
+        }
+    }
+
+    @Test
+    fun sicherungVorUpdateVonVersion5EnthaeltStandorteUndStrecken() {
+        createDatabase(AppDatabase.DB_NAME, 5) { fillVersion5() }
+        var publicBytes: ByteArray? = null
+        val result = PreMigrationBackup.runIfNeeded(context, AppDatabase.DB_NAME, AppDatabase.VERSION, "Max", null) { _, name, bytes ->
+            publicBytes = bytes
+            name
+        }
+        assertEquals(5, result!!.fromVersion)
+        val restored = Backup.fromJson(String(publicBytes!!))
+        assertEquals(3, restored.days.size)
+        assertEquals(3, restored.stops!!.size)
+        assertEquals(50, restored.tracks!!.single().pointCount)
+        assertEquals(1, restored.milestones!!.size)
+        assertNull("alte Datenbank hat noch keine Plätze", restored.places)
     }
 
     /** Gegenprobe: Ohne die Migration 4 → 5 lässt Room die Datenbank nicht öffnen (und löscht nichts). */

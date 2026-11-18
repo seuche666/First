@@ -1,6 +1,14 @@
 package de.fernfahrer.fahrtenbuch.ui.components
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,14 +43,17 @@ import kotlinx.coroutines.delay
 /**
  * Fragt beim Beenden nach dem aktuellen km-Stand. Feld sofort aktiv (Zahlentastatur),
  * letzter bekannter km-Stand als markierter Vorschlag. „Später“ beendet trotzdem.
+ * Bei „Arbeit beenden“ zusätzlich der Haken „Übernachtungsplatz auf der Karte speichern“
+ * (immer leer vorbelegt; nur für die Karte, nicht für die Zählung der Übernachtungen).
  */
 @Composable
 fun KmDialog(
     prompt: KmPrompt,
-    onSave: (Int) -> Unit,
-    onLater: () -> Unit,
+    onSave: (km: Int, savePlace: Boolean) -> Unit,
+    onLater: (savePlace: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var savePlace by remember(prompt) { mutableStateOf(false) }
     val initial = prompt.suggestion?.toString().orEmpty()
     var value by remember(prompt) { mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length))) }
     var error by remember(prompt) { mutableStateOf<String?>(null) }
@@ -56,7 +67,7 @@ fun KmDialog(
                 "Der km-Stand ist kleiner als der Startwert (${Format.km(prompt.minimum)}). Bitte prüfen."
             else -> null
         }
-        if (error == null && km != null) onSave(km)
+        if (error == null && km != null) onSave(km, savePlace)
     }
 
     LaunchedEffect(prompt) {
@@ -107,9 +118,23 @@ fun KmDialog(
                     keyboardActions = KeyboardActions(onDone = { trySave() }),
                     modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 )
+                if (prompt.kind == KmPrompt.Kind.END_WORK) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .toggleable(value = savePlace, role = Role.Checkbox, onValueChange = { savePlace = it })
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = savePlace, onCheckedChange = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Übernachtungsplatz auf der Karte speichern", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         },
         confirmButton = { TextButton(onClick = ::trySave) { Text("Speichern") } },
-        dismissButton = { TextButton(onClick = onLater) { Text("Später") } },
+        dismissButton = { TextButton(onClick = { onLater(savePlace) }) { Text("Später") } },
     )
 }

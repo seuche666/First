@@ -4,7 +4,10 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,8 +37,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import de.fernfahrer.fahrtenbuch.domain.Countries
 import de.fernfahrer.fahrtenbuch.domain.Format
-import de.fernfahrer.fahrtenbuch.ui.components.StatRow
-import de.fernfahrer.fahrtenbuch.ui.components.StatTile
 
 internal class MapHint(
     val id: String,
@@ -100,16 +101,24 @@ internal fun OsmAttribution(modifier: Modifier) {
 @Composable
 internal fun MapStatsCard(stats: MapStats) {
     Surface(color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-            StatRow {
-                StatTile(
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)) {
+            // Drei Kacheln nebeneinander, auch auf schmalen Handys gut lesbar
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                MapStatTile(
                     value = Format.number(Math.round(stats.distanceKm).toInt()),
                     label = "km laut GPS",
                     modifier = Modifier.weight(1f),
                     container = MaterialTheme.colorScheme.primaryContainer,
                     content = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
-                StatTile(
+                MapStatTile(
+                    value = Format.number(stats.dieselLiters.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()),
+                    label = "Liter Diesel",
+                    modifier = Modifier.weight(1f),
+                    container = MaterialTheme.colorScheme.tertiaryContainer,
+                    content = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                MapStatTile(
                     value = stats.countries.size.toString(),
                     label = if (stats.countries.size == 1) "Land befahren" else "Länder befahren",
                     modifier = Modifier.weight(1f),
@@ -125,6 +134,27 @@ internal fun MapStatsCard(stats: MapStats) {
                     maxLines = 2,
                 )
             }
+        }
+    }
+}
+
+/** Kompakte Kennzahl-Kachel: lange Zahlen werden kleiner geschrieben statt abgeschnitten. */
+@Composable
+private fun MapStatTile(value: String, label: String, modifier: Modifier, container: Color = MaterialTheme.colorScheme.surfaceContainerHighest, content: Color = MaterialTheme.colorScheme.onSurface) {
+    Surface(modifier = modifier.fillMaxHeight(), shape = MaterialTheme.shapes.medium, color = container, contentColor = content) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 12.dp)) {
+            Text(
+                value,
+                style = when {
+                    value.length <= 5 -> MaterialTheme.typography.titleLarge
+                    value.length <= 7 -> MaterialTheme.typography.titleMedium
+                    else -> MaterialTheme.typography.titleSmall
+                },
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+            )
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2)
         }
     }
 }

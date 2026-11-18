@@ -13,7 +13,14 @@ import de.fernfahrer.fahrtenbuch.work.TrackingService
 import de.fernfahrer.fahrtenbuch.location.LocationProvider
 import de.fernfahrer.fahrtenbuch.work.ReminderScheduler
 import de.fernfahrer.fahrtenbuch.work.WorkController
+import de.fernfahrer.fahrtenbuch.data.BackupData
+import de.fernfahrer.fahrtenbuch.data.OvernightImport
+import de.fernfahrer.fahrtenbuch.work.AutoBackup
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 
 class FahrtenbuchApp : Application() {
@@ -60,10 +67,34 @@ class FahrtenbuchApp : Application() {
         tracking = Tracking(this, settings)
         work = WorkController(
             repository, settings, reminders, location,
-            tracking = tracking, stopLocator = DeviceStopLocator(settings, location, tracks),
+            tracking = tracking, stopLocator = DeviceStopLocator(location, tracks),
         )
         ReminderScheduler.createChannel(this)
         TrackingService.createChannel(this)
+        AutoBackup.createChannel(this)
         MapConfig.init(this)
+
+        AutoBackup.schedule(this, settings.autoBackup.value, settings.backupFolder.value != null)
     }
+
+    /** Hintergrundaufgaben der App (laufen unabhängig von Bildschirmen). */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * Einmalig nach dem Update auf Datenbank-Version 6: bisher berechnete Übernachtungsplätze als
+     * feste Plätze übernehmen. Wird beim Öffnen der App angestoßen.
+     */
+    fun importOldOvernightPlacesIfNeeded() {
+        if (settings.overnightPlacesImported) return
+        appScope.launch { OvernightImport.runIfNeeded(settings, repository, tracks) }
+    }
+
+    /** Vollständige Datensicherung mit allen Einstellungen (manuell und automatisch gleich). */
+    suspend fun fullBackupData(): BackupData = repository.exportData().copy(
+        driverName = settings.driverName.value,
+        rules = settings.rules.value,
+        workSettings = settings.work.value,
+        mapSettings = settings.map.value,
+        autoBackup = settings.autoBackup.value,
+    )
 }

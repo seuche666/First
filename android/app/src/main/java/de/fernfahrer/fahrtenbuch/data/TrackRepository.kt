@@ -22,6 +22,9 @@ class TrackRepository(db: AppDatabase) {
 
     suspend fun count(): Int = dao.count()
 
+    /** Alle Streckenstücke mit Punkten (für Sicherung und einmalige Übernahmen). */
+    suspend fun allChunks(): List<TrackChunkEntity> = dao.getAllChunks()
+
     /** Letzter aufgezeichneter Punkt, falls er höchstens [maxAgeSec] alt ist. */
     suspend fun lastPoint(nowSec: Long = System.currentTimeMillis() / 1000, maxAgeSec: Long = 1800): TrackPoint? {
         val chunk = dao.getLatestChunk() ?: return null

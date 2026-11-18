@@ -145,6 +145,8 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}) {
                         Spacer(Modifier.width(8.dp))
                         Text("Sicherung wiederherstellen")
                     }
+                    Spacer(Modifier.height(14.dp))
+                    AutoBackupSection(vm)
                 }
             }
 

@@ -19,6 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         DayEntity::class, TourEntity::class, WorkShiftEntity::class, TrackChunkEntity::class,
         StopLocationEntity::class, MilestoneEntity::class, OvernightPlaceEntity::class, OvernightStayEntity::class,
+        ExpenseYearEntity::class, ExpenseRateEntity::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = true,
@@ -28,9 +29,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): FahrtenbuchDao
     abstract fun trackDao(): TrackDao
     abstract fun stopDao(): StopDao
+    abstract fun expenseDao(): ExpenseDao
 
     companion object {
-        const val VERSION = 6
+        const val VERSION = 7
         const val DB_NAME = "fahrtenbuch.db"
 
         fun create(context: Context): AppDatabase =
@@ -153,6 +155,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        /**
+         * Version 6 → 7: neue Tabellen `expense_years` (Spesentabelle je Jahr mit Übernachtungspauschale)
+         * und `expense_rates` (Beträge je Land und Jahr). Beide starten leer. Bestehende Tabellen und
+         * Spalten bleiben unverändert.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `expense_years` (`year` INTEGER NOT NULL, " +
+                        "`overnightCents` INTEGER, PRIMARY KEY(`year`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `expense_rates` (`year` INTEGER NOT NULL, " +
+                        "`countryCode` TEXT NOT NULL, `fullDayCents` INTEGER, `partialDayCents` INTEGER, " +
+                        "PRIMARY KEY(`year`, `countryCode`))",
+                )
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
     }
 }

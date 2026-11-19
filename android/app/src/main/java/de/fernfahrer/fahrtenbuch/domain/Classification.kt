@@ -51,6 +51,9 @@ data class ClassifiedDay(
     /** Übernachtung im LKW in der Nacht nach diesem Tag (von Hand geändert oder automatisch). */
     val overnight: Boolean get() = day.overnightOverride ?: overnightAuto
 
+    /** Das eine Land, für das der Tag zählt (Ausland hat Vorrang, siehe [DayCountries.countingCountry]). */
+    val country: String get() = DayCountries.countingCountry(day)
+
     /** Verwendete Einordnung: manuelle Änderung oder automatisch. */
     val type: DayType get() = day.dayTypeOverride ?: autoType
     val isManual: Boolean get() = day.dayTypeOverride != null && day.dayTypeOverride != autoType

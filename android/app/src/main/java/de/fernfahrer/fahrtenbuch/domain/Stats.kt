@@ -49,7 +49,7 @@ object Stats {
     ): Summary {
         val selected = if (period == null) days else days.filter { period.contains(it.day.date) }
         val byCountry = selected.filter { it.type != DayType.NONE }
-            .groupBy { it.day.countryCode }
+            .groupBy { it.country }
             .map { (code, list) ->
                 CountryCount(code, list.count { it.type == DayType.FULL }, list.count { it.type == DayType.HALF })
             }

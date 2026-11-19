@@ -173,9 +173,35 @@ object OldDatabaseReader {
             } else {
                 null
             }
+            val expenseYears: List<ExpenseYear>? = if (hasTable("expense_years") && hasTable("expense_rates")) {
+                val rates = db.rawQuery("SELECT * FROM expense_rates ORDER BY year, countryCode", null).use { c ->
+                    buildList<ExpenseRateEntity> {
+                        while (c.moveToNext()) {
+                            add(
+                                ExpenseRateEntity(
+                                    year = c.int("year")!!,
+                                    countryCode = c.string("countryCode")!!,
+                                    fullDayCents = c.long("fullDayCents"),
+                                    partialDayCents = c.long("partialDayCents"),
+                                ),
+                            )
+                        }
+                    }
+                }.groupBy { it.year }
+                db.rawQuery("SELECT * FROM expense_years ORDER BY year", null).use { c ->
+                    buildList<ExpenseYear> {
+                        while (c.moveToNext()) {
+                            val y = ExpenseYearEntity(c.int("year")!!, c.long("overnightCents"))
+                            add(ExpenseYear(y, rates[y.year].orEmpty()))
+                        }
+                    }
+                }
+            } else {
+                null
+            }
             BackupData(
                 tours, days, driverName, rules, shifts, tracks = tracks, stops = stops, milestones = milestones,
-                places = places,
+                places = places, expenseYears = expenseYears,
             )
         }
 

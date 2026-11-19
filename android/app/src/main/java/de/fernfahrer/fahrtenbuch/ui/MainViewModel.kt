@@ -197,6 +197,7 @@ class MainViewModel(
     /** Beim Öffnen der App: neue Tage einer laufenden Schicht anlegen, Hinweise anzeigen. */
     fun onForeground() {
         app?.importOldOvernightPlacesIfNeeded()
+        app?.ensureExpenseTableForThisYear()
         viewModelScope.launch {
             try {
                 work.onForeground()

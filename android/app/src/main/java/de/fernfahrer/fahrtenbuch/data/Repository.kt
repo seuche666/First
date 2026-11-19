@@ -425,11 +425,12 @@ class Repository(
     suspend fun exportData(): BackupData = BackupData(
         dao.getAllTours(), dao.getAllDays(), shifts = dao.getAllShifts(), tracks = db.trackDao().getAllChunks(),
         stops = stopDao.getAllStops(), milestones = stopDao.getAllMilestones(), places = getOvernightPlaces(),
+        expenseYears = ExpenseRepository(db).getAll(),
     )
 
     /**
      * Ersetzt alle Daten durch eine Sicherung. Enthält die Sicherung keine Strecken, Standorte,
-     * Meilensteine oder Übernachtungsplätze (ältere Formate), bleiben die vorhandenen erhalten.
+     * Meilensteine, Übernachtungsplätze oder Spesentabellen (ältere Formate), bleiben die vorhandenen erhalten.
      */
     suspend fun replaceAll(data: BackupData) = db.withTransaction {
         dao.deleteAllShifts()
@@ -455,6 +456,13 @@ class Repository(
             stopDao.deleteAllPlaces()
             stopDao.insertPlaces(places.map { it.place })
             stopDao.insertStays(places.flatMap { it.stays })
+        }
+        data.expenseYears?.let { years ->
+            val expenseDao = db.expenseDao()
+            expenseDao.deleteAllRates()
+            expenseDao.deleteAllYears()
+            expenseDao.insertYears(years.map { it.year })
+            expenseDao.insertRates(years.flatMap { it.rates })
         }
     }
 }

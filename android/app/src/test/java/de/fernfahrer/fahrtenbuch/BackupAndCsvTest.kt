@@ -195,7 +195,7 @@ class BackupAndCsvTest {
             ),
         )
         val json = Backup.toJson(full)
-        assertEquals(6, org.json.JSONObject(json).getInt("version"))
+        assertEquals(Backup.VERSION, org.json.JSONObject(json).getInt("version"))
         val restored = Backup.fromJson(json)
         assertEquals(full, restored)
         val day = restored.days.first { it.id == 2L }
@@ -260,12 +260,12 @@ class BackupAndCsvTest {
         // Montag: Tour-Anreisetag, Übernachtung, Arbeit 05:30–24:00, km geschätzt
         assertTrue(
             csv.contains(
-                "04.05.2026;Mo;Frankreich;FR;Frankreich;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;;ja;ja;" +
+                "04.05.2026;Mo;Frankreich;FR;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;;ja;ja;" +
                     "05:30–24:00;18:30;100;700;600;ja;\"Lyon; \"\"Kühl\"\"\"",
             ),
         )
         // Dienstag: Rückreisetag (manuell voll), Arbeit 00:00–02:00 aus der Schicht über Mitternacht
-        assertTrue(csv.contains("05.05.2026;Di;Deutschland;DE;Deutschland;00:00;15:00;15:00;Voller Tag;Manuell geändert"))
+        assertTrue(csv.contains("05.05.2026;Di;Deutschland;DE;00:00;15:00;15:00;Voller Tag;Manuell geändert"))
         assertTrue(csv.contains(";ja;;ja;;00:00–02:00;2:00;700;900;200;;"))
         assertTrue(csv.contains("Übernachtungen im LKW;2"))
         assertTrue(csv.contains("Arbeitszeit gesamt (Std.);20:30"))

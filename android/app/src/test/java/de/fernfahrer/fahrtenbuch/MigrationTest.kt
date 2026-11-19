@@ -248,10 +248,87 @@ class MigrationTest {
                 assertEquals("DE,AT,DE", updated.countries)
                 assertEquals("AT", updated.countryCode)
             }
-            assertEquals(6, room.openHelper.readableDatabase.version)
+            assertEquals(AppDatabase.VERSION, room.openHelper.readableDatabase.version)
         } finally {
             room.close()
         }
+    }
+
+    /** Datenbank im Stand von App-Version 1.0.13 (Datenbank-Version 6) mit Einträgen. */
+    private fun SQLiteDatabase.fillVersion6() {
+        fillVersion5()
+        execSQL("UPDATE days SET countries = 'DE,NL,DE', countryCode = 'NL' WHERE id = 1")
+        execSQL(
+            "INSERT INTO overnight_places (id, latE5, lonE5, countryCode, name, rating, shower, toilet, food, " +
+                "secure, quiet, note) VALUES (1, 4810000, 1150000, 'DE', 'Autohof', 4, 1, 1, 0, 0, 1, 'laut')",
+        )
+        execSQL("INSERT INTO overnight_stays (id, placeId, date, minute, latE5, lonE5) VALUES (1, 1, '2026-11-09', 1200, 4810000, 1150000)")
+    }
+
+    @Test
+    fun updateVonVersion6Auf7BehaeltAlleEintraegeUndLegtLeereSpesentabelleAn() {
+        createDatabase(dbName, 6) { fillVersion6() }
+        val room = openWithRoom(dbName)
+        try {
+            runBlocking {
+                val days = room.dao().getAllDays()
+                assertEquals(3, days.size)
+                val first = days.first { it.id == 1L }
+                assertEquals("DE,NL,DE", first.countries)
+                assertEquals("NL", first.countryCode)
+                assertEquals(2, room.dao().getAllShifts().size)
+                assertEquals(50, room.trackDao().getAllChunks().single().pointCount)
+                assertEquals(3, room.stopDao().getAllStops().size)
+                assertEquals(1, room.stopDao().getAllMilestones().size)
+                assertEquals("Autohof", room.stopDao().getAllPlaces().single().name)
+                assertEquals(1, room.stopDao().getAllStays().size)
+                // Spesentabelle startet komplett leer
+                assertTrue(room.expenseDao().getAllYears().isEmpty())
+                assertTrue(room.expenseDao().getAllRates().isEmpty())
+                // und lässt sich füllen
+                val expenses = de.fernfahrer.fahrtenbuch.data.ExpenseRepository(room)
+                expenses.saveRate(de.fernfahrer.fahrtenbuch.data.ExpenseRateEntity(2026, "NL", 3200, 2100))
+                assertEquals(3200L, room.expenseDao().getRates(2026).single().fullDayCents)
+            }
+            assertEquals(AppDatabase.VERSION, room.openHelper.readableDatabase.version)
+        } finally {
+            room.close()
+        }
+    }
+
+    /** Gegenprobe: Ohne die Migration 6 → 7 lässt Room die Datenbank nicht öffnen (und löscht nichts). */
+    @Test
+    fun ohneMigration6Auf7SchlaegtDasOeffnenFehl() {
+        createDatabase(dbName, 6) { fillVersion6() }
+        val room = openWithRoom(dbName, AppDatabase.MIGRATIONS.filter { it.endVersion <= 6 }.toTypedArray())
+        try {
+            val error = runCatching { runBlocking { room.dao().getAllDays() } }.exceptionOrNull()
+            assertTrue("Ohne Migration muss das Öffnen fehlschlagen", error is IllegalStateException)
+        } finally {
+            room.close()
+        }
+        SQLiteDatabase.openDatabase(context.getDatabasePath(dbName).path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            assertEquals(6, db.version)
+            db.rawQuery("SELECT COUNT(*) FROM days", null).use { c -> c.moveToFirst(); assertEquals(3, c.getInt(0)) }
+            db.rawQuery("SELECT COUNT(*) FROM overnight_places", null).use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        }
+    }
+
+    @Test
+    fun sicherungVorUpdateVonVersion6EnthaeltAlleDaten() {
+        createDatabase(AppDatabase.DB_NAME, 6) { fillVersion6() }
+        var publicBytes: ByteArray? = null
+        val result = PreMigrationBackup.runIfNeeded(context, AppDatabase.DB_NAME, AppDatabase.VERSION, "Max", null) { _, name, bytes ->
+            publicBytes = bytes
+            name
+        }
+        assertEquals(6, result!!.fromVersion)
+        val restored = Backup.fromJson(String(publicBytes!!))
+        assertEquals(3, restored.days.size)
+        assertEquals("DE,NL,DE", restored.days.first { it.id == 1L }.countries)
+        assertEquals(1, restored.places!!.size)
+        assertEquals("Max", restored.driverName)
+        assertNull("alte Datenbank hat noch keine Spesentabelle", restored.expenseYears)
     }
 
     /** Gegenprobe: Ohne die Migration 5 → 6 lässt Room die Datenbank nicht öffnen (und löscht nichts). */

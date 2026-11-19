@@ -117,8 +117,7 @@ object PdfExporter {
             w.row(
                 listOf(
                     Format.weekdayShort(d.date) + ", " + Format.date(d.date),
-                    Countries.name(d.countryCode) +
-                        (d.allCountries - d.countryCode).takeIf { it.isNotEmpty() }?.joinToString(", ", " (+", ")").orEmpty(),
+                    Countries.name(c.country),
                     "${Format.time(d.startMinute)}–${Format.time(d.endMinute)}",
                     "%d:%02d h".format(d.absenceMinutes / 60, d.absenceMinutes % 60),
                     workText,

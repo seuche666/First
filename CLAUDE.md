@@ -62,8 +62,8 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `Classification.kt` | `Classifier`: voller/halber Tag, Firmenregel (nur für die Reisekostenabrechnung), Übernachtung im LKW |
 | `DayCountries.kt` | mehrere Länder pro Tag; **zentrale Regel** `countingCountry(day)` = letztes ausländisches Land (Ausland hat Vorrang), sonst DE; überall über `ClassifiedDay.country` nutzen |
 | `Expenses.kt` | `Euro` (Eingabe „14,00“ ↔ Cent, `money` „1.234,56 €“), `ExpenseRate`, `ExpenseTables` (Kopierquelle, auswählbare Jahre, Länder ohne Betrag) |
-| `EuroCalc.kt` | Euro-Berechnung: `ExpenseBook` (Tabelle je Jahr), `Nights` (Pauschale beim **Folgetag** der Nacht, nur wenn der Folgetag erfasst ist), `EuroCalc.summarize`/`perDay`/`missingYears`; fehlende Beträge = null, nie 0 € |
-| `TravelReport.kt` | monatliche Reisekostenabrechnung: `TravelReports.build` (Zeilen, Summen, fehlende Beträge, laufender Tag weggelassen), automatischer Reiseanlass `autoText`, Dateiname |
+| `EuroCalc.kt` | Euro-Berechnung: `ExpenseBook` (Tabelle je Jahr), `Nights` (Pauschale am **Tag mit „Übernachtung im LKW“** = Abend, an dem man sich schlafen legt; Ankunftstag nein; Kartenpunkt egal), `EuroCalc.summarize`/`perDay`/`missingYears`; fehlende Beträge = null, nie 0 € |
+| `TravelReport.kt` | monatliche Reisekostenabrechnung: `TravelReports.build` (Zeilen, Summen, fehlende Beträge, laufender Tag weggelassen), automatischer Reiseanlass `autoText` (je Arbeitsbeginn „Abfahrt <Ort>“, je Arbeitsende „Ankunft <Ort>“ am Tag des Geschehens, „Übernachtung …“ genau an Tagen mit Pauschale), Dateiname |
 | `WorkSplitter.kt` | Schichten an Mitternacht teilen, km anteilig verteilen |
 | `Stats.kt`, `Period.kt` | Auswertung je Woche/Monat/Jahr (Übernachtungen wie `Nights`, `shortDays` = eintägig unter 8 Std.) |
 | `Countries.kt`, `Format.kt` | Ländernamen/Flaggen, deutsche Formatierung |
@@ -80,7 +80,7 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 **`export/`:** `YearExport.kt` (Jahresübersicht erzeugen, `ExportFormat`), `PdfExporter.kt`, `CsvExporter.kt`
 (Excel, Semikolon, BOM; beide mit Euro-Beträgen), `Share.kt` (Teilen-Menü). Reisekostenabrechnung:
 `TravelReportSource.kt` (sammelt Tage nach **Firmenregel** `COMPANY_RULES`, Arbeitszeiten, Spesentabellen, Orte aus
-GPS-Strecke/Übernachtungsplätzen), `TravelReportLayout.kt` (Spalten, Zellen, Seitenaufteilung – ohne Android, testbar),
+GPS-Strecke je Arbeitsbeginn/-ende (±45 Min.) und Übernachtungsplätzen), `TravelReportLayout.kt` (Spalten, Zellen, Seitenaufteilung – ohne Android, testbar),
 `TravelReportPdf.kt` (zeichnet die Seiten; `drawPage` auch für Vorschaubilder).
 
 **`location/`:** `LocationProvider.kt` (einzelne GPS-Abfrage, lädt die Offline-Daten), `CountryLocator.kt`
@@ -245,11 +245,15 @@ Hinweise für die Cloud-Umgebung:
 
 ## Zuletzt geändert
 
+- **Korrektur Übernachtungspauschale:** gehört zum Tag mit „Übernachtung im LKW“ (Abend), nicht zum Folgetag – überall
+  (Abrechnung, Auswertung, Jahres-PDF/CSV), rückwirkend da immer neu berechnet. Reiseanlass aus den Arbeitszeiten
+  (Abfahrt/Ankunft am Tag, an dem es passiert). Test `OvernightRuleTest` (Tour beenden, Kartenpunkt-Haken).
+
 - **Euro-Berechnung und Reisekostenabrechnung (DB v8, Backup 8):** Euro je Land, Übernachtungspauschale und Gesamt in
   der Auswertung (fehlende Beträge nie als 0 €), Euro auch im Jahres-PDF/CSV; monatliche Reisekostenabrechnung als PDF
   (Vorschau, Reiseanlass änderbar und gespeichert in `days.travelText`, Seitenumbruch mit Tabellenkopf, Teilen/Speichern,
   Dateiname `Reisekosten_JJJJ-MM_Name.pdf`), Erinnerung am 1. um 18 Uhr; Firmenregel nur noch in der Abrechnung,
-  Schalter entfernt; Übernachtungspauschale beim Folgetag der Nacht.
+  Schalter entfernt.
 
 - **Vorarbeiten Spesen (DB v7, Backup 7):** Länder-Regel „Ausland hat Vorrang“ als zentrale Funktion
   (`DayCountries.countingCountry`/`ClassifiedDay.country`), überall nur noch ein Land pro Tag (auch PDF/CSV, CSV ohne

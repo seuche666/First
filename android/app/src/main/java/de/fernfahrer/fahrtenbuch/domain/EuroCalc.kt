@@ -32,21 +32,15 @@ class ExpenseBook(tables: Collection<ExpenseTable>) {
 }
 
 /**
- * Übernachtungen im LKW für die Euro-Berechnung. „Übernachtung im LKW“ ist am Tag vor der Nacht
- * gesetzt; die Pauschale gehört aber zum **Folgetag** (Nacht vom 31.10. auf den 1.11. → November).
- * Eine Nacht zählt nur, wenn der Folgetag erfasst ist – so zählt bei laufender Tour die kommende
- * Nacht erst, wenn sie vorbei ist.
+ * Übernachtungen im LKW für die Euro-Berechnung. Die Pauschale gehört zu dem Tag, an dessen Abend man
+ * sich im LKW schlafen legt – also genau zu den Tagen mit „Übernachtung im LKW“ ([ClassifiedDay.overnight]):
+ * Abfahrtstag und Tage mitten in der Tour ja, Ankunftstag (Tour beendet) nein. Die Nacht vom 31.10. auf
+ * den 1.11. zählt im Oktober. Ob ein Übernachtungsplatz auf der Karte gespeichert wurde, spielt keine Rolle.
  */
 object Nights {
-    /** Tage, denen eine Übernachtungspauschale zugeordnet ist (jeweils der Folgetag einer Nacht im LKW). */
-    fun dates(days: List<ClassifiedDay>): Set<LocalDate> {
-        val recorded = days.map { it.day.date }.toHashSet()
-        return days.asSequence()
-            .filter { it.overnight }
-            .map { it.day.date.plusDays(1) }
-            .filter { it in recorded }
-            .toHashSet()
-    }
+    /** Tage, denen eine Übernachtungspauschale zugeordnet ist. */
+    fun dates(days: List<ClassifiedDay>): Set<LocalDate> =
+        days.asSequence().filter { it.overnight }.map { it.day.date }.toHashSet()
 }
 
 /** Euro-Beträge eines Landes in einem Zeitraum (Summen in Cent; null = mindestens ein Betrag fehlt). */
@@ -102,7 +96,7 @@ data class DayEuro(
 }
 
 object EuroCalc {
-    /** Beträge je Tag (Land nach Länderregel, Nacht beim Folgetag, Tabelle des jeweiligen Jahres). */
+    /** Beträge je Tag (Land nach Länderregel, Nacht am Tag mit „Übernachtung im LKW“, Tabelle des jeweiligen Jahres). */
     fun perDay(days: List<ClassifiedDay>, book: ExpenseBook): Map<LocalDate, DayEuro> {
         val nights = Nights.dates(days)
         return days.associate { c ->

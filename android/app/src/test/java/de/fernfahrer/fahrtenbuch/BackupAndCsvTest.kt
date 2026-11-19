@@ -307,20 +307,20 @@ class BackupAndCsvTest {
         // Montag: Tour-Anreisetag (halber Satz Frankreich), Übernachtung, Arbeit 05:30–24:00, km geschätzt
         assertTrue(
             csv.contains(
-                "04.05.2026;Mo;Frankreich;FR;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;ja;ja;36,00;;36,00;" +
+                "04.05.2026;Mo;Frankreich;FR;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;ja;ja;36,00;8,00;44,00;" +
                     "05:30–24:00;18:30;100;700;600;ja;\"Lyon; \"\"Kühl\"\"\"",
             ),
         )
-        // Dienstag: Rückreisetag (manuell voll), Pauschale für die Nacht Mo→Di, Arbeit 00:00–02:00
+        // Dienstag: Rückreisetag (manuell voll), keine Nacht im LKW, Arbeit 00:00–02:00
         assertTrue(csv.contains("05.05.2026;Di;Deutschland;DE;00:00;15:00;15:00;Voller Tag;Manuell geändert"))
-        assertTrue(csv.contains(";ja;ja;;28,00;8,00;36,00;00:00–02:00;2:00;700;900;200;;"))
-        // Freitag: eintägig 4 Std. – zählt nicht, keine Spesen; die Nacht danach hat keinen erfassten Folgetag
-        assertTrue(csv.contains("08.05.2026;Fr;Deutschland;DE;08:00;12:00;4:00;Zählt nicht;Eintägige Fahrt bis 8 Stunden;;;ja;;;;"))
-        assertTrue(csv.contains("Übernachtungen im LKW;1"))
+        assertTrue(csv.contains(";ja;ja;;28,00;;28,00;00:00–02:00;2:00;700;900;200;;"))
+        // Freitag: eintägig 4 Std. – zählt nicht, aber Übernachtung im LKW (von Hand) → nur Pauschale
+        assertTrue(csv.contains("08.05.2026;Fr;Deutschland;DE;08:00;12:00;4:00;Zählt nicht;Eintägige Fahrt bis 8 Stunden;;;ja;;8,00;8,00;"))
+        assertTrue(csv.contains("Übernachtungen im LKW;2"))
         assertTrue(csv.contains("Eintägig unter 8 Std. (zählen nicht);1"))
         assertTrue(csv.contains("Frankreich;0;1;36,00"))
-        assertTrue(csv.contains("Übernachtungspauschale;1 Nächte;;8,00"))
-        assertTrue(csv.contains("Gesamtsumme;;;72,00"))
+        assertTrue(csv.contains("Übernachtungspauschale;2 Nächte;;16,00"))
+        assertTrue(csv.contains("Gesamtsumme;;;80,00"))
 
         // Fehlender Betrag: keine 0 €, sondern „fehlt“ und Summe unvollständig
         val noFr = ExpenseBook(listOf(ExpenseTable(2026, 800, mapOf("DE" to ExpenseRate("DE", 2800, 1400)))))
@@ -328,7 +328,7 @@ class BackupAndCsvTest {
             2026, classified, summary, "Max", rules, work,
             EuroCalc.summarize(classified, noFr), EuroCalc.perDay(classified, noFr),
         )
-        assertTrue(csv2.contains(";Halber Tag;Anreisetag der Tour;;ja;ja;fehlt;;fehlt;"))
+        assertTrue(csv2.contains(";Halber Tag;Anreisetag der Tour;;ja;ja;fehlt;8,00;fehlt;"))
         assertTrue(csv2.contains("Frankreich;0;1;fehlt"))
         assertTrue(csv2.contains("Gesamtsumme;;;unvollständig – Beträge fehlen"))
         assertTrue(csv.contains("Arbeitszeit gesamt (Std.);20:30"))

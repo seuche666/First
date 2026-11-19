@@ -33,7 +33,8 @@ import org.junit.Test
  * Reisekostenabrechnung November 2026 mit Beispieldaten bis heute (19.11.2026):
  * - Tour A 29.10.–03.11. über den Monatswechsel (01.11. Niederlande, 02.11. Deutschland + Niederlande)
  * - 05.11. eintägig 4 Std. (nur Firmenregel: halber Tag), 06.11. eintägig ohne Übernachtung
- * - Tour B ab 09.11., läuft noch; am 12.11. Hotel (keine Nacht im LKW); heute läuft die Arbeitszeit
+ * - Tour B ab 09.11., läuft noch; am 13.11. Hotel (keine Nacht im LKW); heute läuft die Arbeitszeit
+ * - Übernachtungspauschale 9,00 € an jedem Tag mit „Übernachtung im LKW“ (Abend des Tages)
  */
 class TravelReportTest {
     private val today = LocalDate.of(2026, 11, 19)
@@ -63,7 +64,7 @@ class TravelReportTest {
             add(
                 DayEntity(
                     id++, d(11, day), if (day == 9) 330 else 0, 1440, "DE", tourId = 2,
-                    overnightOverride = if (day == 12) false else null,
+                    overnightOverride = if (day == 13) false else null,
                     travelText = if (day == 10) "Kundentermin Hamburg" else null,
                 ),
             )
@@ -81,17 +82,18 @@ class TravelReportTest {
     )
 
     private val full2026 = ExpenseTable(
-        2026, 800,
+        2026, 900,
         mapOf("DE" to ExpenseRate("DE", 2800, 1400), "NL" to ExpenseRate("NL", 3200, 2100)),
     )
 
     private val places = mapOf(
         d(10, 29) to DayPlaces(first = "Fulda", last = "Seßlach"),
-        d(11, 1) to DayPlaces(first = "Venlo", last = "Venlo", overnight = "Autohof Venlo"),
+        d(11, 1) to DayPlaces(first = "Venlo", last = "Venlo", overnight = "Autohof Venlo", at = mapOf(180 to "Venlo")),
+        d(11, 2) to DayPlaces(at = mapOf(360 to "Venlo", 660 to "Eindhoven", 780 to "Eindhoven", 1170 to "Kleve")),
         d(11, 3) to DayPlaces(first = "Bad Hersfeld", last = "Würzburg"),
         d(11, 6) to DayPlaces(first = "Fulda", last = "Fulda"),
         d(11, 9) to DayPlaces(first = "Fulda", last = "Kassel"),
-        d(11, 12) to DayPlaces(first = "Hamburg", last = "Bremen"),
+        d(11, 13) to DayPlaces(first = "Hamburg", last = "Bremen"),
     )
 
     private val companyDays = Classifier.classifyAll(days, listOf(tourA, tourB), TravelReportSource.COMPANY_RULES)
@@ -130,8 +132,8 @@ class TravelReportTest {
         assertEquals("NL", nov2.countryCode)
         assertEquals(DayType.FULL, nov2.type)
         assertEquals(3200L, nov2.mealCents)
-        assertEquals(800L, nov2.overnightCents)
-        assertEquals(4000L, nov2.sumCents)
+        assertEquals(900L, nov2.overnightCents)
+        assertEquals(4100L, nov2.sumCents)
         // Zwei Arbeitszeiten untereinander
         assertEquals(listOf(360 to 660, 780 to 1170), nov2.times)
 
@@ -150,14 +152,22 @@ class TravelReportTest {
         assertEquals(1400L, nov6.sumCents)
         assertEquals("Abfahrt Fulda\nAnkunft Fulda", nov6.text)
 
-        // Pauschale beim Folgetag: Nacht 31.10.→01.11. im November, Hotel am 12.11. → 13.11. ohne Pauschale
+        // Pauschale am Abend des Tages: 09. und 15. ja, 13. (Hotel) nein, Ankunftstag 03. nein
         assertTrue(r.row(11, 1).hasNight)
-        assertFalse(r.row(11, 9).hasNight)
-        assertTrue(r.row(11, 12).hasNight)
+        assertTrue(r.row(11, 9).hasNight)
+        assertEquals(900L, r.row(11, 9).overnightCents)
+        assertTrue(r.row(11, 15).hasNight)
+        assertEquals(900L, r.row(11, 15).overnightCents)
         assertFalse(r.row(11, 13).hasNight)
+        assertNull(r.row(11, 13).overnightCents)
+        assertFalse(r.row(11, 3).hasNight)
         assertEquals(11, r.nights)
-        assertEquals(8800L, r.overnightCents)
-        assertEquals(800L, r.overnightRate)
+        assertEquals(9900L, r.overnightCents)
+        assertEquals(900L, r.overnightRate)
+        // „Übernachtung …“ steht genau an den Tagen mit Pauschale
+        r.rows.filter { !it.isManual }.forEach { row ->
+            assertEquals("${row.date}", row.hasNight, row.text.contains("Übernachtung"))
+        }
 
         // Summen
         val de = r.countries.single { it.countryCode == "DE" }
@@ -168,7 +178,7 @@ class TravelReportTest {
         assertEquals(2, nl.fullDays)
         assertEquals(6400L, nl.totalCents)
         assertEquals(37200L, r.mealCents)
-        assertEquals(46000L, r.totalCents)
+        assertEquals(47100L, r.totalCents)
         assertEquals("Reisekosten_2026-11_Max_Muster.pdf", r.fileName)
     }
 
@@ -176,12 +186,16 @@ class TravelReportTest {
     fun reiseanlassAutomatischUndVonHand() {
         val r = build(nov)
         // Tour über den Monatswechsel: Fortsetzung am 1., Ankunft am Ende
-        assertEquals("Fortsetzung der Tour vom 29.10.2026\nÜbernachtung bei Autohof Venlo", r.row(11, 1).text)
-        assertEquals("Übernachtung im LKW", r.row(11, 2).text)
+        assertEquals("Fortsetzung der Tour vom 29.10.2026\nAnkunft Venlo\nÜbernachtung bei Autohof Venlo", r.row(11, 1).text)
+        // Zwei Arbeitszeiten: alle Abfahrten und Ankünfte untereinander
+        assertEquals(
+            "Abfahrt Venlo\nAnkunft Eindhoven\nAbfahrt Eindhoven\nAnkunft Kleve\nÜbernachtung im LKW",
+            r.row(11, 2).text,
+        )
         assertEquals("Ankunft Würzburg", r.row(11, 3).text)
         assertEquals("Abfahrt Fulda\nÜbernachtung bei Kassel", r.row(11, 9).text)
         // Hotel statt LKW
-        assertEquals("Tour, unterwegs bei Bremen", r.row(11, 12).text)
+        assertEquals("Tour, unterwegs bei Bremen", r.row(11, 13).text)
         // Von Hand geändert hat Vorrang, automatischer Text bleibt bekannt
         val nov10 = r.row(11, 10)
         assertTrue(nov10.isManual)
@@ -198,17 +212,19 @@ class TravelReportTest {
         assertNull(r.skippedRunning)
         assertEquals(listOf(29, 30, 31), r.rows.map { it.date.dayOfMonth })
         assertEquals("Abfahrt Fulda\nÜbernachtung bei Seßlach", r.row(10, 29).text)
-        assertEquals("Übernachtung im LKW\nTour läuft weiter", r.row(10, 31).text)
-        // Anreisetag halb, ohne Pauschale (die Nacht gehört zum 30.10.)
+        // Arbeitsbeginn 22:00 am 31.10. = Abfahrt am 31.10.; Nacht 31.10.→01.11. im Oktober
+        assertEquals("Abfahrt\nÜbernachtung im LKW\nTour läuft weiter", r.row(10, 31).text)
+        assertTrue(r.row(10, 31).hasNight)
+        // Abfahrtstag: halber Satz + Übernachtung
         assertEquals(DayType.HALF, r.row(10, 29).type)
-        assertFalse(r.row(10, 29).hasNight)
+        assertTrue(r.row(10, 29).hasNight)
         assertTrue(r.row(10, 30).hasNight)
         // Schicht über Mitternacht: Teil bis 24:00 im Oktober …
         assertEquals(listOf(1320 to 1440), r.row(10, 31).times)
         // … der Rest im November
         assertEquals(listOf(0 to 180), build(nov).row(11, 1).times)
-        // Oktober: 29. halb (14,00), 30. + 31. voll (je 28,00) und je eine Nacht (8,00)
-        assertEquals(1400L + 2 * 2800L + 2 * 800L, r.totalCents)
+        // Oktober: 29. halb (14,00), 30. + 31. voll (je 28,00), drei Nächte (je 9,00)
+        assertEquals(1400L + 2 * 2800L + 3 * 900L, r.totalCents)
     }
 
     @Test
@@ -276,8 +292,8 @@ class TravelReportTest {
         assertEquals(listOf("06:00 –", "18:00"), cells[1])
         assertEquals(listOf("Deutschland"), cells[3])
         assertEquals(listOf("28,00"), cells[4])
-        assertEquals(listOf("8,00"), cells[5])
-        assertEquals(listOf("36,00"), cells[6])
+        assertEquals(listOf("9,00"), cells[5])
+        assertEquals(listOf("37,00"), cells[6])
         // Langer Reiseanlass wird umgebrochen
         val long = r.rows[2].copy(manualText = "Kundentermin in Rotterdam und anschließend Leergut nach Venlo")
         assertTrue(TravelReportLayout.cells(long, measure)[2].size > 1)
@@ -297,10 +313,10 @@ class TravelReportTest {
         assertEquals(10, de.fullDays)
         assertEquals(10 * 2800L + 3 * 1400L, de.totalCents)
         assertEquals(6400L, euro.countries.single { it.countryCode == "NL" }.totalCents)
-        // Nächte: 1.–3. und 10.–19. ohne 13. (Hotel am 12.) = 12
+        // Nächte: 1., 2. (nicht 3. = Ankunft) und 9.–19. ohne 13. (Hotel) = 12
         assertEquals(12, euro.nights)
-        assertEquals(9600L, euro.overnightCents)
-        assertEquals(10 * 2800L + 3 * 1400L + 6400L + 9600L, euro.totalCents)
+        assertEquals(10800L, euro.overnightCents)
+        assertEquals(10 * 2800L + 3 * 1400L + 6400L + 10800L, euro.totalCents)
         assertEquals(euro.nights, Stats.summarize(legal, month).overnights)
         assertEquals(1, Stats.summarize(legal, month).shortDays)
 
@@ -321,6 +337,44 @@ class TravelReportTest {
         assertTrue(all.complete)
         val deAll = all.countries.single { it.countryCode == "DE" }
         assertEquals(12 * 2800L + 4 * 1400L + 1500L, deAll.totalCents)
+    }
+
+    /** Beispiel vom Papierzettel: alles steht an dem Tag, an dem es passiert. */
+    @Test
+    fun papierzettelBeispiel() {
+        val tour = TourEntity(20, ended = true)
+        val sep = listOf(
+            DayEntity(201, d(9, 13), 1320, 1440, "DE", tourId = 20),
+            DayEntity(202, d(9, 14), 0, 1440, "DE", tourId = 20),
+            DayEntity(203, d(9, 15), 0, 1380, "DE", tourId = 20),
+        )
+        val sepShifts = listOf(
+            WorkShiftEntity(201, d(9, 13), 22 * 60, d(9, 14), 9 * 60),
+            WorkShiftEntity(202, d(9, 15), 7 * 60, d(9, 15), 23 * 60),
+        )
+        val r = TravelReports.build(
+            YearMonth.of(2026, 9), "Max",
+            Classifier.classifyAll(sep, listOf(tour), TravelReportSource.COMPANY_RULES), listOf(tour),
+            WorkSplitter.byDate(sepShifts, now), ExpenseBook(listOf(full2026)),
+            places = mapOf(
+                d(9, 13) to DayPlaces(at = mapOf(1320 to "Fulda")),
+                d(9, 14) to DayPlaces(at = mapOf(540 to "Würzburg"), overnight = "Würzburg"),
+                d(9, 15) to DayPlaces(at = mapOf(420 to "Würzburg", 1380 to "Fulda")),
+            ),
+            today = today,
+        )
+        // 13. Abfahrt 22:00 → 14 € + 9 €
+        assertEquals("Abfahrt Fulda\nÜbernachtung im LKW", r.row(9, 13).text)
+        assertEquals(listOf(1320 to 1440), r.row(9, 13).times)
+        assertEquals(1400L + 900L, r.row(9, 13).sumCents)
+        // 14. Ankunft 09:00, bleibe draußen → 28 € + 9 €
+        assertEquals("Ankunft Würzburg\nÜbernachtung bei Würzburg", r.row(9, 14).text)
+        assertEquals(2800L + 900L, r.row(9, 14).sumCents)
+        // 15. Abfahrt 07:00, Ankunft 23:00 zu Hause → 14 €, keine Übernachtung
+        assertEquals("Abfahrt Würzburg\nAnkunft Fulda", r.row(9, 15).text)
+        assertFalse(r.row(9, 15).hasNight)
+        assertEquals(1400L, r.row(9, 15).sumCents)
+        assertEquals(7400L, r.totalCents)
     }
 
     @Test

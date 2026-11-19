@@ -12,6 +12,8 @@ data class DayPlaces(
     val last: String? = null,
     /** Übernachtungsplatz des Tages: eigener Name, sonst nächster Ort. */
     val overnight: String? = null,
+    /** Nächster Ort zu einem Arbeitsbeginn/-ende (Minute ab Mitternacht → Ort), aus der GPS-Strecke. */
+    val at: Map<Int, String> = emptyMap(),
 )
 
 /** Eine Zeile der Reisekostenabrechnung (ein Tag). */
@@ -94,7 +96,8 @@ data class TravelReport(
  *   eingeordnet sein (eintägige Fahrten bis 8 Std. = halber Tag). Für die Steuer gilt das nicht.
  * - Jeder Tag gehört in den Monat, in dem er liegt. Der Tag mit laufender Arbeitszeit fehlt.
  * - Land nach der zentralen Länderregel ([ClassifiedDay.country]).
- * - Übernachtungspauschale am Folgetag der Nacht im LKW ([Nights]).
+ * - Übernachtungspauschale an Tagen mit „Übernachtung im LKW“ ([Nights]); nur dort steht auch
+ *   „Übernachtung …“ im Reiseanlass.
  */
 object TravelReports {
     fun build(
@@ -140,6 +143,7 @@ object TravelReports {
                         tourFirst = dates?.min(),
                         tourLast = if (tourId != null && tourEnded[tourId] != false) dates?.max() else null,
                         places = places[date] ?: DayPlaces(),
+                        work = work[date].orEmpty(),
                     ),
                     manualText = c.day.travelText,
                     countryCode = c.country,
@@ -182,7 +186,13 @@ object TravelReports {
     }
 
     /**
-     * Automatischer Text „Reiseanlass und Reiseweg“, z. B. „Abfahrt Fulda\nÜbernachtung bei Seßlach“.
+     * Automatischer Text „Reiseanlass und Reiseweg“ – alles an dem Tag, an dem es passiert:
+     * - jeder Arbeitsbeginn „Abfahrt <Ort>“, jedes Arbeitsende „Ankunft <Ort>“ (Ort aus der GPS-Strecke),
+     *   in zeitlicher Reihenfolge; „Ankunft“ heißt nur Arbeitsende, nicht zu Hause
+     * - darunter „Übernachtung bei <Platz>“ bzw. „Übernachtung im LKW“, genau an Tagen mit Pauschale
+     * - Tag ohne Arbeitsbeginn/-ende und ohne Nacht im LKW: „Tour, unterwegs“
+     * - Tour über den Monatswechsel: „Fortsetzung der Tour vom …“ am 1., „Tour läuft weiter“ am Monatsende
+     * - alte Tage ohne Arbeitszeit: „Abfahrt“ am ersten, „Ankunft“ am letzten Tourtag
      *
      * @param tourLast letzter Tag der Tour, nur wenn die Tour beendet ist.
      */
@@ -192,33 +202,37 @@ object TravelReports {
         tourFirst: LocalDate?,
         tourLast: LocalDate?,
         places: DayPlaces,
+        work: List<WorkPortion> = emptyList(),
     ): String {
         val date = c.day.date
+        val inTour = c.day.tourId != null && tourFirst != null
         val lines = mutableListOf<String>()
         fun at(prefix: String, place: String?) = if (place.isNullOrBlank()) prefix else "$prefix $place"
-        fun overnightLine() =
-            if (places.overnight != null || places.last != null) "Übernachtung bei ${places.overnight ?: places.last}"
-            else "Übernachtung im LKW"
 
-        if (c.day.tourId == null || tourFirst == null) {
-            // Eintägige Fahrt
-            lines += at("Abfahrt", places.first)
-            lines += if (c.overnight) overnightLine() else at("Ankunft", places.last)
-            return lines.joinToString("\n")
-        }
-
-        if (date == tourFirst) {
-            lines += at("Abfahrt", places.first)
-        } else if (date == month.atDay(1)) {
+        if (inTour && date == month.atDay(1) && tourFirst!!.isBefore(date)) {
             lines += "Fortsetzung der Tour vom ${Format.date(tourFirst)}"
         }
-        when {
-            date == tourLast -> lines += at("Ankunft", places.last)
-            c.overnight -> lines += overnightLine()
-            places.last != null -> lines += "Tour, unterwegs bei ${places.last}"
-            else -> lines += "Tour, unterwegs"
+
+        // Abfahrt/Ankunft aus den Arbeitszeiten des Tages
+        val events = mutableListOf<String>()
+        for (p in work.sortedBy { it.startMinute ?: it.endMinute ?: 0 }) {
+            if (p.startMinute != null && !p.fromPreviousDay) events += at("Abfahrt", places.at[p.startMinute])
+            if (p.endMinute != null && !p.toNextDay && !p.running) events += at("Ankunft", places.at[p.endMinute])
         }
-        if (date == month.atEndOfMonth() && date != tourLast) lines += "Tour läuft weiter"
+        if (work.isEmpty()) {
+            // Alte Einträge ohne Arbeitszeit
+            if (!inTour || date == tourFirst) events += at("Abfahrt", places.first)
+            if ((!inTour && !c.overnight) || (inTour && date == tourLast)) events += at("Ankunft", places.last)
+        }
+        lines += events
+
+        when {
+            c.overnight -> lines += places.overnight?.let { "Übernachtung bei $it" }
+                ?: places.last?.let { "Übernachtung bei $it" }
+                ?: "Übernachtung im LKW"
+            events.isEmpty() -> lines += at("Tour, unterwegs", places.last?.let { "bei $it" })
+        }
+        if (inTour && date == month.atEndOfMonth() && date != tourLast) lines += "Tour läuft weiter"
         return lines.joinToString("\n")
     }
 

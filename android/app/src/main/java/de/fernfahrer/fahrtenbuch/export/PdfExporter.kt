@@ -172,7 +172,7 @@ object PdfExporter {
         if (anyManual || anyEstimated || summary.overnights > 0 || euro != null) w.space(6f)
         if (summary.overnights > 0) {
             w.text(
-                "Ü = Übernachtung im LKW in der Nacht nach diesem Tag (die Pauschale steht beim Folgetag)",
+                "Ü = Übernachtung im LKW in der Nacht nach diesem Tag (mit Übernachtungspauschale)",
                 paint(8.5f, color = muted), 12f,
             )
         }

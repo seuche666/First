@@ -22,10 +22,7 @@ data class Summary(
     val companyRuleDays: Int = 0,
     /** Summe der erfassten Arbeitszeit in Minuten (nur für die Firma). */
     val workMinutes: Int = 0,
-    /**
-     * Anzahl Übernachtungen im LKW, jeweils dem Folgetag der Nacht zugeordnet (siehe [Nights]) – so wie
-     * die Übernachtungspauschale berechnet wird.
-     */
+    /** Anzahl Übernachtungen im LKW (Tage mit „Übernachtung im LKW“, siehe [Nights]). */
     val overnights: Int = 0,
     /** Eintägige Fahrten bis 8 Std. (zählen für die Steuer nicht, getrennt ausgewiesen). */
     val shortDays: Int = 0,

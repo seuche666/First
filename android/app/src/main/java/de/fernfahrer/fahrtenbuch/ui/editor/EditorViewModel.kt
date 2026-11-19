@@ -213,6 +213,8 @@ class EditorViewModel(
             kmInterpolated = orig != null && orig.kmInterpolated && orig.kmStart == kmS && orig.kmEnd == kmE,
             // Gespeichert über die Eingabe = von Hand bestätigt
             timesAuto = false,
+            // Von Hand geänderter Reiseanlass (Reisekostenabrechnung) bleibt erhalten
+            travelText = orig?.travelText,
         )
     }
 

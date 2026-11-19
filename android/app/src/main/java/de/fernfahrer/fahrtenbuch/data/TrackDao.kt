@@ -18,6 +18,10 @@ interface TrackDao {
     @Query("SELECT * FROM track_chunks ORDER BY trackId, seq")
     suspend fun getAllChunks(): List<TrackChunkEntity>
 
+    /** Stücke, die den Zeitraum [from, to) berühren (Sekunden seit 1970, UTC). */
+    @Query("SELECT * FROM track_chunks WHERE endTime >= :from AND startTime < :to ORDER BY startTime, trackId, seq")
+    suspend fun getChunksBetween(from: Long, to: Long): List<TrackChunkEntity>
+
     @Query("SELECT * FROM track_chunks ORDER BY endTime DESC LIMIT 1")
     suspend fun getLatestChunk(): TrackChunkEntity?
 

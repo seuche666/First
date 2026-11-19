@@ -59,6 +59,11 @@ data class DayEntity(
      * leer = nur [countryCode]. [countryCode] ist das Land, für das der Tag zählt (siehe [DayCountries]).
      */
     @ColumnInfo(defaultValue = "") val countries: String = "",
+    /**
+     * Von Hand geänderter Text „Reiseanlass und Reiseweg“ für die Reisekostenabrechnung
+     * (ab Datenbank-Version 8); null = automatischer Text.
+     */
+    val travelText: String? = null,
 ) {
     /** Länder des Tages in Besuchsreihenfolge (mindestens eins). */
     val countryRoute: List<String> get() = DayCountries.parse(countries, countryCode)

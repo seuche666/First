@@ -26,6 +26,9 @@ interface ExpenseDao {
     suspend fun getRates(year: Int): List<ExpenseRateEntity>
 
     @Query("SELECT * FROM expense_rates ORDER BY year, countryCode")
+    fun observeAllRates(): Flow<List<ExpenseRateEntity>>
+
+    @Query("SELECT * FROM expense_rates ORDER BY year, countryCode")
     suspend fun getAllRates(): List<ExpenseRateEntity>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)

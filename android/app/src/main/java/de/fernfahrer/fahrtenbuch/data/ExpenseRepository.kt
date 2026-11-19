@@ -1,7 +1,9 @@
 package de.fernfahrer.fahrtenbuch.data
 
 import androidx.room.withTransaction
+import de.fernfahrer.fahrtenbuch.domain.ExpenseBook
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 /** Speichern der Spesentabellen (eine pro Jahr). */
 class ExpenseRepository(private val db: AppDatabase) {
@@ -37,6 +39,14 @@ class ExpenseRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteRate(year: Int, code: String) = dao.deleteRate(year, code)
+
+    /** Alle Tabellen für die Euro-Berechnung (ändert sich bei jeder Eingabe). */
+    val book: Flow<ExpenseBook> = combine(dao.observeYears(), dao.observeAllRates()) { years, rates ->
+        val byYear = rates.groupBy { it.year }
+        ExpenseBook(years.map { ExpenseYear(it, byYear[it.year].orEmpty()).toTable() })
+    }
+
+    suspend fun getBook(): ExpenseBook = ExpenseBook(getAll().map { it.toTable() })
 
     /** Alle Tabellen (für die Datensicherung). */
     suspend fun getAll(): List<ExpenseYear> {

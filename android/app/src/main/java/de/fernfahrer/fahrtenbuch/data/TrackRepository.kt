@@ -34,5 +34,8 @@ class TrackRepository(db: AppDatabase) {
         return if (nowSec - p.timeSec <= maxAgeSec) p else null
     }
 
+    /** Stücke, die den Zeitraum [fromSec, toSec) berühren. */
+    suspend fun chunksBetween(fromSec: Long, toSec: Long): List<TrackChunkEntity> = dao.getChunksBetween(fromSec, toSec)
+
     suspend fun deleteAll() = dao.deleteAll()
 }

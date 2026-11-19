@@ -50,6 +50,8 @@ import de.fernfahrer.fahrtenbuch.ui.editor.EditorMode
 import de.fernfahrer.fahrtenbuch.ui.editor.EditorScreen
 import de.fernfahrer.fahrtenbuch.ui.expenses.ExpenseScreen
 import de.fernfahrer.fahrtenbuch.ui.history.HistoryScreen
+import de.fernfahrer.fahrtenbuch.ui.report.ReportScreen
+import de.fernfahrer.fahrtenbuch.ui.report.parseMonth
 import de.fernfahrer.fahrtenbuch.ui.home.HomeScreen
 import de.fernfahrer.fahrtenbuch.ui.map.MapScreen
 import de.fernfahrer.fahrtenbuch.ui.map.MilestoneCelebration
@@ -65,7 +67,18 @@ internal enum class Tab(val route: String, val label: String, val icon: ImageVec
 
 internal const val MAP_ROUTE = "karte"
 internal const val SETTINGS_ROUTE = "einstellungen"
-internal const val EXPENSES_ROUTE = "spesentabelle"
+internal const val EXPENSES_ROUTE = "spesentabelle?jahr={jahr}"
+internal const val REPORT_ROUTE = "abrechnung?monat={monat}"
+
+/** Spesentabelle öffnen, optional bei einem bestimmten Jahr. */
+internal fun NavHostController.openExpenses(year: Int? = null) {
+    navigate(if (year != null) "spesentabelle?jahr=$year" else "spesentabelle") { launchSingleTop = true }
+}
+
+/** Reisekostenabrechnung öffnen, optional für einen bestimmten Monat („2026-10“). */
+internal fun NavHostController.openReport(month: java.time.YearMonth? = null) {
+    navigate(if (month != null) "abrechnung?monat=$month" else "abrechnung") { launchSingleTop = true }
+}
 internal const val EDITOR_ROUTE = "eintrag?id={id}&mode={mode}&fresh={fresh}"
 
 /** Überschrift je Ansicht (neben dem Zahnrad). */
@@ -108,6 +121,13 @@ fun AppRoot() {
     }
     LaunchedEffect(Unit) {
         vm.messages.collect { snackbar.showSnackbar(it) }
+    }
+    // Erinnerung an die Reisekostenabrechnung angetippt: Vorschau des Monats öffnen
+    val reportRequest by vm.reportRequests.collectAsStateWithLifecycle()
+    LaunchedEffect(reportRequest) {
+        val month = reportRequest ?: return@LaunchedEffect
+        vm.consumeReportRequest()
+        nav.openReport(month)
     }
     // Beim Öffnen der App: neue Tage einer laufenden Arbeitszeit anlegen (Teilung an Mitternacht)
     LifecycleStartEffect(Unit) {
@@ -174,7 +194,13 @@ fun AppRoot() {
                 composable(Tab.HISTORY.route) {
                     HistoryScreen(vm = vm, onOpenDay = { nav.openEditor(it) }, onAdd = { nav.openEditor(fresh = true) })
                 }
-                composable(Tab.STATS.route) { StatsScreen(vm = vm) }
+                composable(Tab.STATS.route) {
+                    StatsScreen(
+                        vm = vm,
+                        onOpenExpenses = { nav.openExpenses(it) },
+                        onOpenReport = { nav.openReport() },
+                    )
+                }
                 composable(MAP_ROUTE) { MapScreen(mainVm = vm) }
                 composable(
                     SETTINGS_ROUTE,
@@ -184,15 +210,32 @@ fun AppRoot() {
                     SettingsScreen(
                         vm = vm,
                         onBack = { nav.popBackStack() },
-                        onOpenExpenses = { nav.navigate(EXPENSES_ROUTE) { launchSingleTop = true } },
+                        onOpenExpenses = { nav.openExpenses() },
                     )
                 }
                 composable(
                     EXPENSES_ROUTE,
+                    arguments = listOf(navArgument("jahr") { type = NavType.StringType; nullable = true; defaultValue = null }),
                     enterTransition = { slideInHorizontally(tween(260)) { it / 3 } + fadeIn(tween(260)) },
                     popExitTransition = { slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(220)) },
-                ) {
-                    ExpenseScreen(recentCountries = vm.recentCountries, onBack = { nav.popBackStack() })
+                ) { entry ->
+                    ExpenseScreen(
+                        recentCountries = vm.recentCountries,
+                        onBack = { nav.popBackStack() },
+                        initialYear = entry.arguments?.getString("jahr")?.toIntOrNull(),
+                    )
+                }
+                composable(
+                    REPORT_ROUTE,
+                    arguments = listOf(navArgument("monat") { type = NavType.StringType; nullable = true; defaultValue = null }),
+                    enterTransition = { slideInHorizontally(tween(260)) { it / 3 } + fadeIn(tween(260)) },
+                    popExitTransition = { slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(220)) },
+                ) { entry ->
+                    ReportScreen(
+                        initialMonth = parseMonth(entry.arguments?.getString("monat")),
+                        onBack = { nav.popBackStack() },
+                        onOpenExpenses = { nav.openExpenses(it) },
+                    )
                 }
                 composable(
                     route = EDITOR_ROUTE,

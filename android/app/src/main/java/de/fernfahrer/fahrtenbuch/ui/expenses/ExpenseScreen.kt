@@ -37,6 +37,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,8 +71,11 @@ private data class RateEdit(val code: String, val existing: ExpenseRateEntity?)
 fun ExpenseScreen(
     recentCountries: StateFlow<List<String>>,
     onBack: () -> Unit,
+    /** Beim Öffnen dieses Jahr zeigen (z. B. aus „Betrag fehlt“). */
+    initialYear: Int? = null,
     vm: ExpenseViewModel = viewModel(factory = ExpenseViewModel.Factory),
 ) {
+    LaunchedEffect(initialYear) { initialYear?.let(vm::selectYear) }
     val state by vm.state.collectAsStateWithLifecycle()
     val recent by recentCountries.collectAsStateWithLifecycle()
     var picking by remember { mutableStateOf(false) }

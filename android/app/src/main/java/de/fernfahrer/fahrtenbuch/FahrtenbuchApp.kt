@@ -17,6 +17,8 @@ import de.fernfahrer.fahrtenbuch.work.WorkController
 import de.fernfahrer.fahrtenbuch.data.BackupData
 import de.fernfahrer.fahrtenbuch.data.OvernightImport
 import de.fernfahrer.fahrtenbuch.work.AutoBackup
+import de.fernfahrer.fahrtenbuch.work.ReportReminder
+import de.fernfahrer.fahrtenbuch.export.TravelReportSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,6 +46,14 @@ class FahrtenbuchApp : Application() {
 
     /** „Arbeit beenden“ aus der Benachrichtigung: Zeitpunkt des Tippens, bis die App ihn abholt. */
     val endWorkRequests = MutableStateFlow<LocalDateTime?>(null)
+
+    /** Erinnerung an die Reisekostenabrechnung angetippt: Monat, dessen Vorschau geöffnet werden soll. */
+    val reportRequests = MutableStateFlow<java.time.YearMonth?>(null)
+
+    /** Daten für die monatliche Reisekostenabrechnung. */
+    val travelReports: TravelReportSource by lazy {
+        TravelReportSource(repository, expenses, tracks, placeLocator = { location.placeLocator() })
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -76,9 +86,11 @@ class FahrtenbuchApp : Application() {
         ReminderScheduler.createChannel(this)
         TrackingService.createChannel(this)
         AutoBackup.createChannel(this)
+        ReportReminder.createChannel(this)
         MapConfig.init(this)
 
         AutoBackup.schedule(this, settings.autoBackup.value, settings.backupFolder.value != null)
+        ReportReminder.schedule(this, settings.reportReminder.value)
     }
 
     /** Hintergrundaufgaben der App (laufen unabhängig von Bildschirmen). */

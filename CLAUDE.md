@@ -35,22 +35,22 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 **`data/` – Speichern**
 | Datei | Zuständig für |
 |---|---|
-| `AppDatabase.kt` | Room-Datenbank, Version **7**, alle Migrationen (`MIGRATIONS`) |
-| `DayEntity.kt`, `TourEntity.kt`, `WorkShiftEntity.kt` | Tabellen `days` (mit `countries` = alle Länder des Tages), `tours`, `work_shifts` |
+| `AppDatabase.kt` | Room-Datenbank, Version **8**, alle Migrationen (`MIGRATIONS`) |
+| `DayEntity.kt`, `TourEntity.kt`, `WorkShiftEntity.kt` | Tabellen `days` (mit `countries` = alle Länder des Tages, `travelText` = eigener Reiseanlass, null = automatisch), `tours`, `work_shifts` |
 | `TrackChunkEntity.kt` | Tabelle `track_chunks` (GPS-Strecke, Punkte als BLOB) + `TrackChunkMeta` (ohne Punkte) |
 | `StopLocationEntity.kt`, `MilestoneEntity.kt` | Tabellen `stop_locations` (alte Standorte bis v5, werden nicht mehr angelegt), `milestones` |
 | `OvernightPlaceEntity.kt` | Tabellen `overnight_places` (Platz mit Name, Sternen, Ausstattung, Notiz) und `overnight_stays` (einzelne Übernachtungen); `OvernightPlace` |
 | `ExpenseEntities.kt` | Tabellen `expense_years` (Jahr + Übernachtungspauschale) und `expense_rates` (Jahr + Land: voller/halber Tag), Beträge in Cent, null = leer; `ExpenseYear` |
-| `ExpenseDao.kt`, `ExpenseRepository.kt` | Spesentabellen lesen/speichern; `ensureYear` legt ein Jahr als Kopie des jüngsten früheren Jahres an (sonst leer) |
+| `ExpenseDao.kt`, `ExpenseRepository.kt` | Spesentabellen lesen/speichern; `ensureYear` legt ein Jahr als Kopie des jüngsten früheren Jahres an (sonst leer); `book`/`getBook()` = alle Jahre als `ExpenseBook` |
 | `OvernightImport.kt` | einmalige Übernahme der bis v5 berechneten Übernachtungsplätze (ohne heute) nach Update/Wiederherstellen alter Sicherung |
 | `FahrtenbuchDao.kt`, `TrackDao.kt`, `StopDao.kt` | Datenbank-Abfragen (Tage/Touren/Schichten, Strecken, Standorte/Meilensteine/Übernachtungsplätze) |
 | `Converters.kt` | Datum ↔ Text für Room |
 | `Repository.kt` | gesamte Speicherlogik für Tage, Touren, Arbeitsschichten (Arbeit beginnen/beenden, km-Übernahme, Tour beenden), Länder per GPS/Grenzübertritt, Übernachtungsplätze, Export/Import aller Daten |
 | `RepositoryResults.kt` | Ergebnis-Typen `StartResult`, `EndTourResult` |
 | `TrackRepository.kt`, `TrackChunks.kt` | Strecken speichern/laden; Streckenstück aus Punkten bauen |
-| `Settings.kt` | Einstellungen (SharedPreferences), u. a. Name (`driverName`, in der App „Name“), Verbrauch, automatisches Backup (Ordner-URI, letztes Backup) |
+| `Settings.kt` | Einstellungen (SharedPreferences), u. a. Name (`driverName`, in der App „Name“), Verbrauch, automatisches Backup (Ordner-URI, letztes Backup), Erinnerung an die Abrechnung; `rules` ist fest die gesetzliche Regel |
 | `BackupModels.kt` | Datenmodelle der Sicherung (`BackupData` inkl. `expenseYears`, `WorkSettings`, `MapSettings` mit Verbrauch, `AutoBackupSettings`, `LegacyWork`) |
-| `Backup.kt` | Datensicherung als JSON, Format **7** (liest 1–6), Spesentabellen unter `expenseTables` |
+| `Backup.kt` | Datensicherung als JSON, Format **8** (liest 1–7), Spesentabellen unter `expenseTables`, Reiseanlass je Tag `travelText` |
 | `BackupFiles.kt` | Sicherungsdatei lesen/schreiben (Speicherort vom Nutzer gewählt) |
 | `BackupFolder.kt` | Ordner für automatische Backups (`SafBackupFolder`: Android-Ordnerauswahl, auch Google Drive) |
 | `PreMigrationBackup.kt` | automatische Sicherung vor jeder Migration (Kopie + JSON unter Download/Fahrtenbuch) |
@@ -59,11 +59,13 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 **`domain/` – Logik ohne Android**
 | Datei | Zuständig für |
 |---|---|
-| `Classification.kt` | `Classifier`: voller/halber Tag, Firmenregel, Übernachtung im LKW |
+| `Classification.kt` | `Classifier`: voller/halber Tag, Firmenregel (nur für die Reisekostenabrechnung), Übernachtung im LKW |
 | `DayCountries.kt` | mehrere Länder pro Tag; **zentrale Regel** `countingCountry(day)` = letztes ausländisches Land (Ausland hat Vorrang), sonst DE; überall über `ClassifiedDay.country` nutzen |
-| `Expenses.kt` | `Euro` (Eingabe „14,00“ ↔ Cent), `ExpenseRate`, `ExpenseTables` (Kopierquelle, auswählbare Jahre, Länder ohne Betrag) |
+| `Expenses.kt` | `Euro` (Eingabe „14,00“ ↔ Cent, `money` „1.234,56 €“), `ExpenseRate`, `ExpenseTables` (Kopierquelle, auswählbare Jahre, Länder ohne Betrag) |
+| `EuroCalc.kt` | Euro-Berechnung: `ExpenseBook` (Tabelle je Jahr), `Nights` (Pauschale beim **Folgetag** der Nacht, nur wenn der Folgetag erfasst ist), `EuroCalc.summarize`/`perDay`/`missingYears`; fehlende Beträge = null, nie 0 € |
+| `TravelReport.kt` | monatliche Reisekostenabrechnung: `TravelReports.build` (Zeilen, Summen, fehlende Beträge, laufender Tag weggelassen), automatischer Reiseanlass `autoText`, Dateiname |
 | `WorkSplitter.kt` | Schichten an Mitternacht teilen, km anteilig verteilen |
-| `Stats.kt`, `Period.kt` | Auswertung je Woche/Monat/Jahr |
+| `Stats.kt`, `Period.kt` | Auswertung je Woche/Monat/Jahr (Übernachtungen wie `Nights`, `shortDays` = eintägig unter 8 Std.) |
 | `Countries.kt`, `Format.kt` | Ländernamen/Flaggen, deutsche Formatierung |
 | `Milestones.kt` | Meilensteine berechnen (mit Datum des Erreichens) |
 | `MilestoneInputs.kt` | Eingabe für die Meilensteine aus Tagen und GPS-Strecken |
@@ -76,7 +78,10 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `geo/BorderDetector.kt` | Grenzübertritt erst nach 5 Min. **und** 3 km im neuen Land |
 
 **`export/`:** `YearExport.kt` (Jahresübersicht erzeugen, `ExportFormat`), `PdfExporter.kt`, `CsvExporter.kt`
-(Excel, Semikolon, BOM), `Share.kt` (Teilen-Menü).
+(Excel, Semikolon, BOM; beide mit Euro-Beträgen), `Share.kt` (Teilen-Menü). Reisekostenabrechnung:
+`TravelReportSource.kt` (sammelt Tage nach **Firmenregel** `COMPANY_RULES`, Arbeitszeiten, Spesentabellen, Orte aus
+GPS-Strecke/Übernachtungsplätzen), `TravelReportLayout.kt` (Spalten, Zellen, Seitenaufteilung – ohne Android, testbar),
+`TravelReportPdf.kt` (zeichnet die Seiten; `drawPage` auch für Vorschaubilder).
 
 **`location/`:** `LocationProvider.kt` (einzelne GPS-Abfrage, lädt die Offline-Daten), `CountryLocator.kt`
 (Land aus `assets/country_borders.bin`, Natural Earth, Skript `tools/build_country_borders.py`),
@@ -91,6 +96,7 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `Tracking.kt` | Aufzeichnung starten/stoppen, Berechtigungen, Akku-Optimierung |
 | `StopLocator.kt` | Position beim Arbeitsende (für den Übernachtungsplatz mit Haken) |
 | `BorderWatcher.kt` | Streckenpunkte → `BorderDetector` → `WorkController.onBorderCrossed` |
+| `ReportReminder.kt` | Erinnerung am 1. um 18 Uhr „Reisekostenabrechnung für … erstellen?“ (WorkManager, nachholen bis zum 7.), öffnet die Vorschau des Vormonats |
 | `AutoBackup.kt` | automatisches Backup: Fälligkeit, Schreiben, alte löschen, WorkManager-Auftrag (`AutoBackupWorker`, alle 6 Std. prüfen), Fehler-Benachrichtigung |
 | `ReminderScheduler.kt`, `ReminderReceiver.kt` | Erinnerung „Arbeit läuft seit 15 Std.“ |
 | `BootReceiver.kt` | nach Neustart/Update Erinnerung und Aufzeichnung wiederherstellen |
@@ -112,6 +118,8 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `home/ActionCards.kt`, `home/WorkCard.kt`, `home/SummaryCards.kt` | Erfassen-/Tour-Karten, Arbeitszeit-Karte, Woche/Jahr |
 | `history/HistoryScreen.kt` | Verlauf |
 | `stats/StatsScreen.kt`, `stats/StatsWidgets.kt`, `stats/Charts.kt` | Auswertung, Zeitraum-Auswahl/Auslandstabelle, Diagramme |
+| `stats/EuroCard.kt` | Karte „Spesen in Euro“ (je Land, Übernachtungspauschale, Gesamt bzw. „unvollständig“ + Knopf zur Spesentabelle) |
+| `report/ReportScreen.kt`, `report/ReportViewModel.kt`, `report/TravelTextDialog.kt` | Reisekostenabrechnung (Route `abrechnung?monat=…`): Monat, Vorschau, Reiseanlass ändern/zurücksetzen, Warnung bei fehlenden Beträgen, PDF teilen/speichern |
 | `editor/EditorScreen.kt` | Eintrag-Bildschirm (Aufbau, Dialoge) |
 | `editor/EditorSections.kt` | Abschnitte: Abwesenheit, Arbeitszeit, Länder (mehrere), km, fehlende Tage, Übernachtung, Einordnung, Notiz |
 | `editor/EditorWidgets.kt` | kleine Bausteine (Feldkarte, Zeit-Kachel, Umschalter …) |
@@ -120,7 +128,7 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `settings/SettingsScreen.kt` | Einstellungen (Fahrer, Sicherung, Regeln, Über), Dialoge |
 | `settings/WorkSettingsCard.kt`, `settings/MapSettingsCard.kt`, `settings/SettingsWidgets.kt` | Karten Arbeitszeit und Karte (inkl. Dieselverbrauch); Schalter/Berechtigungs-Hinweise |
 | `settings/AutoBackupSection.kt` | automatisches Backup im Bereich Datensicherung |
-| `expenses/ExpenseScreen.kt`, `expenses/ExpenseDialogs.kt`, `expenses/ExpenseViewModel.kt` | Spesentabelle (eigener Bildschirm, Route `spesentabelle`, aus den Einstellungen): Jahr-Auswahl, Pauschale, Länderbeträge, Hinweis auf fehlende Beträge; Dialoge mit Euro-Feld |
+| `expenses/ExpenseScreen.kt`, `expenses/ExpenseDialogs.kt`, `expenses/ExpenseViewModel.kt` | Spesentabelle (eigener Bildschirm, Route `spesentabelle?jahr=…`, aus den Einstellungen und „Betrag fehlt“): Jahr-Auswahl, Pauschale, Länderbeträge, Hinweis auf fehlende Beträge; Dialoge mit Euro-Feld |
 | `map/MapScreen.kt` | Kartenansicht (Aufbau, Hinweise, Statistik, Dialoge) |
 | `map/FogMap.kt` | osmdroid-Karte mit Nebel, LKW, Übernachtungs-Symbolen (mit Sternen), Knöpfen und „Versetzen“-Modus |
 | `map/MapViewModel.kt` | Strecken laden, `FogGeometry` bauen, Statistik (inkl. Liter Diesel aus Tacho-km), Übernachtungsplätze bearbeiten |
@@ -162,7 +170,13 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 - **Automatisches Backup:** gleiche Daten wie manuell (`FahrtenbuchApp.fullBackupData`), Ordner per
   `OpenDocumentTree` mit dauerhafter Berechtigung; Dateien `Fahrtenbuch-Auto-<Datum>_<Zeit>.json`.
 - **Spesentabelle:** `FahrtenbuchApp.ensureExpenseTableForThisYear` (aus `MainViewModel.onForeground`) legt das
-  aktuelle Jahr an (Kopie des Vorjahres = Jahreswechsel). Jahre sind danach unabhängig. Noch keine Euro-Berechnung.
+  aktuelle Jahr an (Kopie des Vorjahres = Jahreswechsel). Jahre sind danach unabhängig. Euro: jeder Tag mit der Tabelle
+  seines Jahres (`EuroCalc`).
+- **Zwei Zählregeln:** Auswertung und Jahresexport (Steuer) immer gesetzlich (`Settings.rules`, kein Schalter mehr);
+  die Reisekostenabrechnung für die Firma mit Firmenregel (`TravelReportSource.COMPANY_RULES`: eintägig bis 8 Std. = halb).
+- **Reisekostenabrechnung:** Auswertung → `ReportScreen` → `ReportViewModel` → `TravelReportSource.build` →
+  `TravelReports.build` → `TravelReportPdf`. Ohne vollständige Beträge keine PDF. Erinnerung `ReportReminder` →
+  `MainActivity` (`ACTION_OPEN_REPORT`) → `FahrtenbuchApp.reportRequests` → `AppRoot` öffnet die Vorschau.
 - **Datensicherung:** Neue Tabellen/Felder müssen an drei Stellen ergänzt werden: `Backup` (JSON hin und
   zurück, Modelle in `BackupModels`), `Repository.exportData`/`replaceAll` und `OldDatabaseReader`
   (liest alte Datenbanken roh per SQL, Tabellen/Spalten jeweils optional).
@@ -230,6 +244,12 @@ Hinweise für die Cloud-Umgebung:
   Kopf der Skripte); die Ergebnisdateien sind eingecheckt.
 
 ## Zuletzt geändert
+
+- **Euro-Berechnung und Reisekostenabrechnung (DB v8, Backup 8):** Euro je Land, Übernachtungspauschale und Gesamt in
+  der Auswertung (fehlende Beträge nie als 0 €), Euro auch im Jahres-PDF/CSV; monatliche Reisekostenabrechnung als PDF
+  (Vorschau, Reiseanlass änderbar und gespeichert in `days.travelText`, Seitenumbruch mit Tabellenkopf, Teilen/Speichern,
+  Dateiname `Reisekosten_JJJJ-MM_Name.pdf`), Erinnerung am 1. um 18 Uhr; Firmenregel nur noch in der Abrechnung,
+  Schalter entfernt; Übernachtungspauschale beim Folgetag der Nacht.
 
 - **Vorarbeiten Spesen (DB v7, Backup 7):** Länder-Regel „Ausland hat Vorrang“ als zentrale Funktion
   (`DayCountries.countingCountry`/`ClassifiedDay.country`), überall nur noch ein Land pro Tag (auch PDF/CSV, CSV ohne

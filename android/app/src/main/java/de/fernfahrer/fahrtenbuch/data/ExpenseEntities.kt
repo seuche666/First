@@ -3,6 +3,7 @@ package de.fernfahrer.fahrtenbuch.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import de.fernfahrer.fahrtenbuch.domain.ExpenseRate
+import de.fernfahrer.fahrtenbuch.domain.ExpenseTable
 
 /**
  * Spesentabelle eines Jahres (Tabelle `expense_years`, ab Datenbank-Version 7). Jedes Jahr ist
@@ -30,4 +31,6 @@ data class ExpenseRateEntity(
 }
 
 /** Spesentabelle eines Jahres mit allen Ländern (für Sicherung und Anzeige). */
-data class ExpenseYear(val year: ExpenseYearEntity, val rates: List<ExpenseRateEntity>)
+data class ExpenseYear(val year: ExpenseYearEntity, val rates: List<ExpenseRateEntity>) {
+    fun toTable() = ExpenseTable(year.year, year.overnightCents, rates.associate { it.countryCode to it.toRate() })
+}

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.PictureAsPdf
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.Timeline
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -39,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.fernfahrer.fahrtenbuch.domain.Countries
+import de.fernfahrer.fahrtenbuch.domain.EuroCalc
 import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.PeriodType
 import de.fernfahrer.fahrtenbuch.domain.Stats
@@ -51,7 +54,11 @@ import java.time.LocalDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatsScreen(vm: MainViewModel) {
+fun StatsScreen(
+    vm: MainViewModel,
+    onOpenExpenses: (Int?) -> Unit = {},
+    onOpenReport: () -> Unit = {},
+) {
     val days by vm.days.collectAsStateWithLifecycle()
     val period by vm.period.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -60,6 +67,10 @@ fun StatsScreen(vm: MainViewModel) {
     val workByDate by vm.workByDate.collectAsStateWithLifecycle()
     val summary = remember(all, period, workByDate) { Stats.summarize(all, period, workByDate) }
     val kmBars = remember(all, period) { Stats.kmBars(all, period) }
+    val book by vm.expenseBook.collectAsStateWithLifecycle()
+    val euroPeriod = if (period.type == PeriodType.ALL) null else period
+    val euro = remember(all, period, book) { EuroCalc.summarize(all, book, euroPeriod) }
+    val missingYear = remember(all, period, book) { EuroCalc.missingYears(all, book, euroPeriod).firstOrNull() }
     val exportYear = if (period.type == PeriodType.ALL) LocalDate.now().year else period.anchor.year
 
     Scaffold(
@@ -97,23 +108,43 @@ fun StatsScreen(vm: MainViewModel) {
                             StatTile(sum.overnights.toString(), "Übernachtungen im LKW", Modifier.weight(1f))
                             StatTile(Format.duration(sum.workMinutes).removeSuffix(" Std."), "Std. Arbeitszeit", Modifier.weight(1f))
                         }
-                        if (sum.companyRuleDays > 0) {
+                        if (sum.shortDays > 0) {
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                "Davon ${Format.days(sum.companyRuleDays)} nur nach Firmenregel halb " +
-                                    "(eintägig, 8 Std. oder weniger – das Finanzamt verlangt mehr als 8 Std.)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.tertiary,
-                            )
-                        }
-                        if (sum.notCounted > 0) {
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                "${Format.days(sum.notCounted)} mit 8 Std. oder weniger (zählen nicht)",
+                                "Unter 8 Std.: ${Format.days(sum.shortDays)} eintägig mit 8 Std. oder weniger " +
+                                    "(zählen für die Steuer nicht)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        val manualNone = sum.notCounted - sum.shortDays
+                        if (manualNone > 0) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "${Format.days(manualNone)} von Hand auf „zählt nicht“ gesetzt",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item { EuroCard(euro, missingYear, onOpenExpenses) }
+
+            item {
+                SectionCard(title = "Reisekostenabrechnung", icon = Icons.Rounded.Description) {
+                    Text(
+                        "Monatliche Abrechnung für die Firma als PDF: alle Tage des Monats mit Verpflegung " +
+                            "und Übernachtung, vorher Vorschau mit änderbarem Reiseanlass.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Button(onClick = onOpenReport, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                        Icon(Icons.Rounded.Description, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Reisekostenabrechnung")
                     }
                 }
             }
@@ -174,7 +205,7 @@ fun StatsScreen(vm: MainViewModel) {
             item {
                 SectionCard(title = "Jahresübersicht $exportYear", icon = Icons.Rounded.IosShare) {
                     Text(
-                        "Als PDF oder Tabelle (CSV, z. B. für Excel) erstellen und über das Teilen-Menü versenden " +
+                        "Mit Euro-Beträgen aus der Spesentabelle. Als PDF oder Tabelle (CSV, z. B. für Excel) erstellen und über das Teilen-Menü versenden " +
                             "oder speichern – etwa für die Steuererklärung.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

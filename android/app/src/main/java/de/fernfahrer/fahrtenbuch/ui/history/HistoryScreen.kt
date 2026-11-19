@@ -161,11 +161,11 @@ private fun DayCard(entry: ClassifiedDay, work: List<WorkPortion>?, onClick: () 
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Alle Länder des Tages als Flaggen; der Name ist das Land, für das der Tag zählt
-                    Text(d.allCountries.joinToString(" ") { Countries.flag(it) }, fontSize = 18.sp)
+                    // Nur das Land, für das der Tag zählt (Ausland hat Vorrang)
+                    Text(Countries.flag(entry.country), fontSize = 18.sp)
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        Countries.name(d.countryCode),
+                        Countries.name(entry.country),
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

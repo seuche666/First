@@ -43,7 +43,7 @@ internal fun TodayCard(entry: ClassifiedDay, onClick: () -> Unit) {
                 Text("Heute erfasst", style = MaterialTheme.typography.titleMedium)
                 Text(
                     buildString {
-                        append(d.allCountries.joinToString(", ") { Countries.label(it) })
+                        append(Countries.label(entry.country))
                         append(" · ${Format.time(d.startMinute)}–${Format.time(d.endMinute)}")
                         d.distanceKm?.let { append(" · ${Format.km(it)}") }
                     },

@@ -35,20 +35,22 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 **`data/` – Speichern**
 | Datei | Zuständig für |
 |---|---|
-| `AppDatabase.kt` | Room-Datenbank, Version **6**, alle Migrationen (`MIGRATIONS`) |
+| `AppDatabase.kt` | Room-Datenbank, Version **7**, alle Migrationen (`MIGRATIONS`) |
 | `DayEntity.kt`, `TourEntity.kt`, `WorkShiftEntity.kt` | Tabellen `days` (mit `countries` = alle Länder des Tages), `tours`, `work_shifts` |
 | `TrackChunkEntity.kt` | Tabelle `track_chunks` (GPS-Strecke, Punkte als BLOB) + `TrackChunkMeta` (ohne Punkte) |
 | `StopLocationEntity.kt`, `MilestoneEntity.kt` | Tabellen `stop_locations` (alte Standorte bis v5, werden nicht mehr angelegt), `milestones` |
 | `OvernightPlaceEntity.kt` | Tabellen `overnight_places` (Platz mit Name, Sternen, Ausstattung, Notiz) und `overnight_stays` (einzelne Übernachtungen); `OvernightPlace` |
+| `ExpenseEntities.kt` | Tabellen `expense_years` (Jahr + Übernachtungspauschale) und `expense_rates` (Jahr + Land: voller/halber Tag), Beträge in Cent, null = leer; `ExpenseYear` |
+| `ExpenseDao.kt`, `ExpenseRepository.kt` | Spesentabellen lesen/speichern; `ensureYear` legt ein Jahr als Kopie des jüngsten früheren Jahres an (sonst leer) |
 | `OvernightImport.kt` | einmalige Übernahme der bis v5 berechneten Übernachtungsplätze (ohne heute) nach Update/Wiederherstellen alter Sicherung |
 | `FahrtenbuchDao.kt`, `TrackDao.kt`, `StopDao.kt` | Datenbank-Abfragen (Tage/Touren/Schichten, Strecken, Standorte/Meilensteine/Übernachtungsplätze) |
 | `Converters.kt` | Datum ↔ Text für Room |
 | `Repository.kt` | gesamte Speicherlogik für Tage, Touren, Arbeitsschichten (Arbeit beginnen/beenden, km-Übernahme, Tour beenden), Länder per GPS/Grenzübertritt, Übernachtungsplätze, Export/Import aller Daten |
 | `RepositoryResults.kt` | Ergebnis-Typen `StartResult`, `EndTourResult` |
 | `TrackRepository.kt`, `TrackChunks.kt` | Strecken speichern/laden; Streckenstück aus Punkten bauen |
-| `Settings.kt` | Einstellungen (SharedPreferences), u. a. Verbrauch, automatisches Backup (Ordner-URI, letztes Backup) |
-| `BackupModels.kt` | Datenmodelle der Sicherung (`BackupData`, `WorkSettings`, `MapSettings` mit Verbrauch, `AutoBackupSettings`, `LegacyWork`) |
-| `Backup.kt` | Datensicherung als JSON, Format **6** (liest 1–5) |
+| `Settings.kt` | Einstellungen (SharedPreferences), u. a. Name (`driverName`, in der App „Name“), Verbrauch, automatisches Backup (Ordner-URI, letztes Backup) |
+| `BackupModels.kt` | Datenmodelle der Sicherung (`BackupData` inkl. `expenseYears`, `WorkSettings`, `MapSettings` mit Verbrauch, `AutoBackupSettings`, `LegacyWork`) |
+| `Backup.kt` | Datensicherung als JSON, Format **7** (liest 1–6), Spesentabellen unter `expenseTables` |
 | `BackupFiles.kt` | Sicherungsdatei lesen/schreiben (Speicherort vom Nutzer gewählt) |
 | `BackupFolder.kt` | Ordner für automatische Backups (`SafBackupFolder`: Android-Ordnerauswahl, auch Google Drive) |
 | `PreMigrationBackup.kt` | automatische Sicherung vor jeder Migration (Kopie + JSON unter Download/Fahrtenbuch) |
@@ -58,7 +60,8 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | Datei | Zuständig für |
 |---|---|
 | `Classification.kt` | `Classifier`: voller/halber Tag, Firmenregel, Übernachtung im LKW |
-| `DayCountries.kt` | mehrere Länder pro Tag; zählendes Land = letztes ausländisches (Ausland hat Vorrang) |
+| `DayCountries.kt` | mehrere Länder pro Tag; **zentrale Regel** `countingCountry(day)` = letztes ausländisches Land (Ausland hat Vorrang), sonst DE; überall über `ClassifiedDay.country` nutzen |
+| `Expenses.kt` | `Euro` (Eingabe „14,00“ ↔ Cent), `ExpenseRate`, `ExpenseTables` (Kopierquelle, auswählbare Jahre, Länder ohne Betrag) |
 | `WorkSplitter.kt` | Schichten an Mitternacht teilen, km anteilig verteilen |
 | `Stats.kt`, `Period.kt` | Auswertung je Woche/Monat/Jahr |
 | `Countries.kt`, `Format.kt` | Ländernamen/Flaggen, deutsche Formatierung |
@@ -117,6 +120,7 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
 | `settings/SettingsScreen.kt` | Einstellungen (Fahrer, Sicherung, Regeln, Über), Dialoge |
 | `settings/WorkSettingsCard.kt`, `settings/MapSettingsCard.kt`, `settings/SettingsWidgets.kt` | Karten Arbeitszeit und Karte (inkl. Dieselverbrauch); Schalter/Berechtigungs-Hinweise |
 | `settings/AutoBackupSection.kt` | automatisches Backup im Bereich Datensicherung |
+| `expenses/ExpenseScreen.kt`, `expenses/ExpenseDialogs.kt`, `expenses/ExpenseViewModel.kt` | Spesentabelle (eigener Bildschirm, Route `spesentabelle`, aus den Einstellungen): Jahr-Auswahl, Pauschale, Länderbeträge, Hinweis auf fehlende Beträge; Dialoge mit Euro-Feld |
 | `map/MapScreen.kt` | Kartenansicht (Aufbau, Hinweise, Statistik, Dialoge) |
 | `map/FogMap.kt` | osmdroid-Karte mit Nebel, LKW, Übernachtungs-Symbolen (mit Sternen), Knöpfen und „Versetzen“-Modus |
 | `map/MapViewModel.kt` | Strecken laden, `FogGeometry` bauen, Statistik (inkl. Liter Diesel aus Tacho-km), Übernachtungsplätze bearbeiten |
@@ -148,7 +152,8 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
   Übernachtungsplätze sind **fest gespeichert** (`overnight_places`/`overnight_stays`) und entstehen nur bei
   „Arbeit beenden“ mit Haken (`WorkController.endWork(savePlace = true)`); im Umkreis 200 m → bestehender Platz.
   Unabhängig von der Steuer-Zählung `ClassifiedDay.overnight`.
-- **Länder:** `days.countryCode` = zählendes Land, `days.countries` = Reihenfolge aller Länder. Während der
+- **Länder:** Verlauf, Startseite, Auswertung, CSV/PDF zeigen pro Tag nur `ClassifiedDay.country`
+  (Ausland hat Vorrang, aus `days.countries` neu berechnet); alle Länder nur im Editor. `days.countryCode` = zählendes Land, `days.countries` = Reihenfolge aller Länder. Während der
   Arbeitszeit: `TrackingService` → `BorderWatcher` → `WorkController.onBorderCrossed` →
   `Repository.recordBorderCrossing` (nicht bei `countryManual`).
 - **Meilensteine:** `MilestoneState` (im `MainViewModel`) berechnet sie laufend aus Tagen und Strecken
@@ -156,6 +161,8 @@ Grundsatz: **`data/`** speichert, **`domain/`** rechnet (reine Logik ohne Androi
   entscheidet, ob eine Meldung erscheint.
 - **Automatisches Backup:** gleiche Daten wie manuell (`FahrtenbuchApp.fullBackupData`), Ordner per
   `OpenDocumentTree` mit dauerhafter Berechtigung; Dateien `Fahrtenbuch-Auto-<Datum>_<Zeit>.json`.
+- **Spesentabelle:** `FahrtenbuchApp.ensureExpenseTableForThisYear` (aus `MainViewModel.onForeground`) legt das
+  aktuelle Jahr an (Kopie des Vorjahres = Jahreswechsel). Jahre sind danach unabhängig. Noch keine Euro-Berechnung.
 - **Datensicherung:** Neue Tabellen/Felder müssen an drei Stellen ergänzt werden: `Backup` (JSON hin und
   zurück, Modelle in `BackupModels`), `Repository.exportData`/`replaceAll` und `OldDatabaseReader`
   (liest alte Datenbanken roh per SQL, Tabellen/Spalten jeweils optional).
@@ -223,6 +230,11 @@ Hinweise für die Cloud-Umgebung:
   Kopf der Skripte); die Ergebnisdateien sind eingecheckt.
 
 ## Zuletzt geändert
+
+- **Vorarbeiten Spesen (DB v7, Backup 7):** Länder-Regel „Ausland hat Vorrang“ als zentrale Funktion
+  (`DayCountries.countingCountry`/`ClassifiedDay.country`), überall nur noch ein Land pro Tag (auch PDF/CSV, CSV ohne
+  Spalte „Alle Länder“); Spesentabelle je Jahr (Pauschale LKW, Beträge je Land, automatische Kopie zum Jahreswechsel,
+  Hinweis auf fehlende Beträge); Feld „Fahrer“ heißt jetzt „Name“. Euro-Berechnung/Spesenbericht folgen später.
 
 - **Übernachtungsplätze fest + bearbeitbar, Land automatisch, Diesel, automatisches Backup (DB v6, Backup 6):**
   Mond-Punkt wandert nicht mehr mit; Platz nur per Haken beim „Arbeit beenden“; Umbenennen, Versetzen,

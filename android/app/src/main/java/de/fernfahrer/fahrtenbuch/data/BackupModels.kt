@@ -71,6 +71,8 @@ data class BackupData(
     val places: List<OvernightPlace>? = null,
     /** Einstellungen des automatischen Backups (ab Format 6); null bei älteren Sicherungen. */
     val autoBackup: AutoBackupSettings? = null,
+    /** Spesentabellen je Jahr (ab Format 7); null bei älteren Sicherungen – vorhandene bleiben dann erhalten. */
+    val expenseYears: List<ExpenseYear>? = null,
 )
 
 class BackupFormatException(message: String) : Exception(message)

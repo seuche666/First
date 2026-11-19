@@ -28,7 +28,7 @@ object CsvExporter {
         rows += emptyList<String>()
 
         rows += listOf(
-            "Datum", "Wochentag", "Land", "Ländercode", "Alle Länder des Tages", "Beginn", "Ende", "Abwesenheit (Std.)",
+            "Datum", "Wochentag", "Land", "Ländercode", "Beginn", "Ende", "Abwesenheit (Std.)",
             "Einordnung", "Begründung", "Manuell geändert", "Firmenregel", "Tour", "Übernachtung im LKW",
             "Arbeitszeit", "Arbeitszeit (Std.)",
             "km morgens", "km abends", "km gefahren", "km anteilig geschätzt", "Notiz",
@@ -39,9 +39,8 @@ object CsvExporter {
             rows += listOf(
                 Format.date(d.date),
                 Format.weekdayShort(d.date),
-                Countries.name(d.countryCode),
-                d.countryCode,
-                d.allCountries.joinToString(", ") { Countries.name(it) },
+                Countries.name(c.country),
+                c.country,
                 Format.time(d.startMinute),
                 Format.time(d.endMinute),
                 hours(d.absenceMinutes),

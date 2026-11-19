@@ -19,11 +19,13 @@ import org.json.JSONObject
  * - 5: Standorte beim Arbeitsende (Übernachtungsorte) und erreichte Meilensteine
  * - 6: mehrere Länder pro Tag, Übernachtungsplätze mit Namen, Notizen und einzelnen Übernachtungen,
  *      Dieselverbrauch, Einstellungen des automatischen Backups
+ * - 7: Spesentabellen je Jahr (Übernachtungspauschale, Beträge je Land in Cent); `driverName` ist der
+ *      Name aus den Einstellungen
  * Ältere Sicherungen werden weiterhin gelesen; fehlende Felder erhalten sinnvolle Werte.
  */
 object Backup {
     private const val APP_ID = "fahrtenbuch-android"
-    const val VERSION = 6
+    const val VERSION = 7
 
     fun toJson(data: BackupData): String {
         val root = JSONObject()
@@ -163,6 +165,27 @@ object Backup {
                 "autoBackup",
                 JSONObject().put("enabled", it.enabled).put("interval", it.interval.name).put("keep", it.keep),
             )
+        }
+        data.expenseYears?.let { years ->
+            root.put("expenseTables", JSONArray().apply {
+                years.forEach { (y, rates) ->
+                    put(
+                        JSONObject()
+                            .put("year", y.year)
+                            .put("overnightCents", y.overnightCents.orNull())
+                            .put("rates", JSONArray().apply {
+                                rates.forEach { r ->
+                                    put(
+                                        JSONObject()
+                                            .put("countryCode", r.countryCode)
+                                            .put("fullDayCents", r.fullDayCents.orNull())
+                                            .put("partialDayCents", r.partialDayCents.orNull()),
+                                    )
+                                }
+                            }),
+                    )
+                }
+            })
         }
         return root.toString(2)
     }
@@ -333,9 +356,26 @@ object Backup {
                     keep = AutoBackupSettings.validKeep(it.optInt("keep", AutoBackupSettings.DEFAULT_KEEP)),
                 )
             }
+            val expenseYears = root.optJSONArray("expenseTables")?.let { arr ->
+                (0 until arr.length()).map { i ->
+                    val y = arr.getJSONObject(i)
+                    val year = y.getInt("year").also { require(it in 1900..2999) }
+                    val ratesJson = y.optJSONArray("rates") ?: JSONArray()
+                    val rates = (0 until ratesJson.length()).map { j ->
+                        val r = ratesJson.getJSONObject(j)
+                        ExpenseRateEntity(
+                            year = year,
+                            countryCode = r.getString("countryCode").uppercase().also { require(it.length == 2) },
+                            fullDayCents = r.optLongOrNull("fullDayCents")?.also { require(it >= 0) },
+                            partialDayCents = r.optLongOrNull("partialDayCents")?.also { require(it >= 0) },
+                        )
+                    }.distinctBy { it.countryCode }
+                    ExpenseYear(ExpenseYearEntity(year, y.optLongOrNull("overnightCents")?.also { require(it >= 0) }), rates)
+                }.distinctBy { it.year.year }
+            }
             return BackupData(
                 tours, days, root.optString("driverName", ""), rules, shifts, workSettings, tracks, mapSettings,
-                stops, milestones, places, autoBackup,
+                stops, milestones, places, autoBackup, expenseYears,
             )
         } catch (e: BackupFormatException) {
             throw e

@@ -21,6 +21,8 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Rule
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Euro
+import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
@@ -57,7 +59,7 @@ import java.time.LocalDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}) {
+fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}, onOpenExpenses: () -> Unit = {}) {
     val context = LocalContext.current
     val savedName by vm.driverName.collectAsStateWithLifecycle()
     val pending by vm.pendingRestore.collectAsStateWithLifecycle()
@@ -103,19 +105,37 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                SectionCard(title = "Fahrer", icon = Icons.Rounded.Person) {
+                SectionCard(title = "Name", icon = Icons.Rounded.Person) {
                     OutlinedTextField(
                         value = name,
                         onValueChange = {
                             name = it.take(60)
                             vm.setDriverName(name.trim())
                         },
-                        label = { Text("Dein Name (erscheint im Export)") },
+                        label = { Text("Dein Name (optional)") },
+                        supportingText = { Text("Erscheint im Export und später im Spesenbericht.") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.medium,
                     )
+                }
+            }
+
+            item {
+                SectionCard(title = "Spesentabelle", icon = Icons.Rounded.Euro) {
+                    Text(
+                        "Deine Beträge je Land für volle Tage und An-/Abreisetage sowie die " +
+                            "Übernachtungspauschale im LKW – eine Tabelle pro Jahr.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    FilledTonalButton(onClick = onOpenExpenses, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                        Icon(Icons.Rounded.TableChart, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Spesentabelle öffnen")
+                    }
                 }
             }
 

@@ -48,6 +48,7 @@ import androidx.navigation.navArgument
 import de.fernfahrer.fahrtenbuch.ui.components.KmDialog
 import de.fernfahrer.fahrtenbuch.ui.editor.EditorMode
 import de.fernfahrer.fahrtenbuch.ui.editor.EditorScreen
+import de.fernfahrer.fahrtenbuch.ui.expenses.ExpenseScreen
 import de.fernfahrer.fahrtenbuch.ui.history.HistoryScreen
 import de.fernfahrer.fahrtenbuch.ui.home.HomeScreen
 import de.fernfahrer.fahrtenbuch.ui.map.MapScreen
@@ -64,6 +65,7 @@ internal enum class Tab(val route: String, val label: String, val icon: ImageVec
 
 internal const val MAP_ROUTE = "karte"
 internal const val SETTINGS_ROUTE = "einstellungen"
+internal const val EXPENSES_ROUTE = "spesentabelle"
 internal const val EDITOR_ROUTE = "eintrag?id={id}&mode={mode}&fresh={fresh}"
 
 /** Überschrift je Ansicht (neben dem Zahnrad). */
@@ -179,7 +181,18 @@ fun AppRoot() {
                     enterTransition = { slideInHorizontally(tween(260)) { it / 3 } + fadeIn(tween(260)) },
                     popExitTransition = { slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(220)) },
                 ) {
-                    SettingsScreen(vm = vm, onBack = { nav.popBackStack() })
+                    SettingsScreen(
+                        vm = vm,
+                        onBack = { nav.popBackStack() },
+                        onOpenExpenses = { nav.navigate(EXPENSES_ROUTE) { launchSingleTop = true } },
+                    )
+                }
+                composable(
+                    EXPENSES_ROUTE,
+                    enterTransition = { slideInHorizontally(tween(260)) { it / 3 } + fadeIn(tween(260)) },
+                    popExitTransition = { slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(220)) },
+                ) {
+                    ExpenseScreen(recentCountries = vm.recentCountries, onBack = { nav.popBackStack() })
                 }
                 composable(
                     route = EDITOR_ROUTE,

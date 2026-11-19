@@ -2,6 +2,7 @@ package de.fernfahrer.fahrtenbuch
 
 import android.app.Application
 import de.fernfahrer.fahrtenbuch.data.AppDatabase
+import de.fernfahrer.fahrtenbuch.data.ExpenseRepository
 import de.fernfahrer.fahrtenbuch.data.PreMigrationBackup
 import de.fernfahrer.fahrtenbuch.data.Repository
 import de.fernfahrer.fahrtenbuch.data.Settings
@@ -38,6 +39,8 @@ class FahrtenbuchApp : Application() {
         private set
     lateinit var tracking: Tracking
         private set
+    lateinit var expenses: ExpenseRepository
+        private set
 
     /** „Arbeit beenden“ aus der Benachrichtigung: Zeitpunkt des Tippens, bis die App ihn abholt. */
     val endWorkRequests = MutableStateFlow<LocalDateTime?>(null)
@@ -62,6 +65,7 @@ class FahrtenbuchApp : Application() {
         val db = AppDatabase.create(this)
         repository = Repository(db, settings.rules)
         tracks = TrackRepository(db)
+        expenses = ExpenseRepository(db)
         location = LocationProvider(this)
         reminders = ReminderScheduler(this, settings)
         tracking = Tracking(this, settings)
@@ -87,6 +91,14 @@ class FahrtenbuchApp : Application() {
     fun importOldOvernightPlacesIfNeeded() {
         if (settings.overnightPlacesImported) return
         appScope.launch { OvernightImport.runIfNeeded(settings, repository, tracks) }
+    }
+
+    /**
+     * Spesentabelle des aktuellen Jahres anlegen, falls es sie noch nicht gibt (zum Jahreswechsel als
+     * Kopie des Vorjahres). Wird beim Öffnen der App angestoßen.
+     */
+    fun ensureExpenseTableForThisYear() {
+        appScope.launch { runCatching { expenses.ensureYear(java.time.LocalDate.now().year) } }
     }
 
     /** Vollständige Datensicherung mit allen Einstellungen (manuell und automatisch gleich). */

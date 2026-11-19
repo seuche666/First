@@ -32,7 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun expenseDao(): ExpenseDao
 
     companion object {
-        const val VERSION = 7
+        const val VERSION = 8
         const val DB_NAME = "fahrtenbuch.db"
 
         fun create(context: Context): AppDatabase =
@@ -174,6 +174,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        /**
+         * Version 7 → 8: von Hand geänderter Text „Reiseanlass und Reiseweg“ pro Tag
+         * (Reisekostenabrechnung). Bestehende Tage: leer (= automatischer Text).
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE days ADD COLUMN travelText TEXT")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+        )
     }
 }

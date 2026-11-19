@@ -21,11 +21,12 @@ import org.json.JSONObject
  *      Dieselverbrauch, Einstellungen des automatischen Backups
  * - 7: Spesentabellen je Jahr (Übernachtungspauschale, Beträge je Land in Cent); `driverName` ist der
  *      Name aus den Einstellungen
+ * - 8: von Hand geänderter Text „Reiseanlass und Reiseweg“ pro Tag (`travelText`, Reisekostenabrechnung)
  * Ältere Sicherungen werden weiterhin gelesen; fehlende Felder erhalten sinnvolle Werte.
  */
 object Backup {
     private const val APP_ID = "fahrtenbuch-android"
-    const val VERSION = 7
+    const val VERSION = 8
 
     fun toJson(data: BackupData): String {
         val root = JSONObject()
@@ -74,7 +75,8 @@ object Backup {
                         .put("overnightOverride", d.overnightOverride.orNull())
                         .put("kmInterpolated", d.kmInterpolated)
                         .put("timesAuto", d.timesAuto)
-                        .put("countries", d.countries),
+                        .put("countries", d.countries)
+                        .put("travelText", d.travelText.orNull()),
                 )
             }
         })
@@ -236,6 +238,8 @@ object Backup {
                     timesAuto = d.optBoolean("timesAuto", false),
                     // Ab Format 6; ältere Sicherungen: nur ein Land pro Tag.
                     countries = d.optString("countries", ""),
+                    // Ab Format 8; ältere Sicherungen: automatischer Text.
+                    travelText = d.optStringOrNull("travelText"),
                 )
             }
             if (days.map { it.date }.toSet().size != days.size) {

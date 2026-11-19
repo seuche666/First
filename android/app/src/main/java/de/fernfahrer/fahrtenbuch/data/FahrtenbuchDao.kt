@@ -68,6 +68,10 @@ interface FahrtenbuchDao {
     @Update
     suspend fun updateTour(tour: TourEntity)
 
+    /** Text „Reiseanlass und Reiseweg“ eines Tages setzen; null = automatisch. */
+    @Query("UPDATE days SET travelText = :text WHERE date = :date")
+    suspend fun setTravelText(date: LocalDate, text: String?)
+
     @Query("DELETE FROM tours WHERE id = :id")
     suspend fun deleteTour(id: Long)
 

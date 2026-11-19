@@ -22,6 +22,7 @@ object Format {
     fun weekdayDate(d: LocalDate): String = d.format(weekdayDateFmt)
     fun longDate(d: LocalDate): String = d.format(longDateFmt)
     fun monthYear(d: LocalDate): String = d.format(monthYearFmt).replaceFirstChar { it.uppercase(de) }
+    fun weekdayLong(d: LocalDate): String = d.dayOfWeek.getDisplayName(TextStyle.FULL, de)
     fun weekdayShort(d: LocalDate): String = d.dayOfWeek.getDisplayName(TextStyle.SHORT, de).removeSuffix(".")
     fun monthShort(month: Int): String =
         java.time.Month.of(month).getDisplayName(TextStyle.SHORT, de).removeSuffix(".")

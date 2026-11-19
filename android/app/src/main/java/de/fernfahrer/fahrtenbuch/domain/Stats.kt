@@ -22,8 +22,13 @@ data class Summary(
     val companyRuleDays: Int = 0,
     /** Summe der erfassten Arbeitszeit in Minuten (nur für die Firma). */
     val workMinutes: Int = 0,
-    /** Anzahl Übernachtungen im LKW. */
+    /**
+     * Anzahl Übernachtungen im LKW, jeweils dem Folgetag der Nacht zugeordnet (siehe [Nights]) – so wie
+     * die Übernachtungspauschale berechnet wird.
+     */
     val overnights: Int = 0,
+    /** Eintägige Fahrten bis 8 Std. (zählen für die Steuer nicht, getrennt ausgewiesen). */
+    val shortDays: Int = 0,
 ) {
     /** Tage unterwegs = volle + halbe Tage. */
     val daysAway: Int get() = full + half
@@ -40,6 +45,7 @@ object Stats {
     const val HOME_COUNTRY = "DE"
 
     /**
+     * @param days alle Tage (auch außerhalb des Zeitraums, für die Zuordnung der Nächte)
      * @param work Tagesanteile der Arbeitsschichten (siehe [WorkSplitter.byDate]) für die Arbeitszeit-Summe.
      */
     fun summarize(
@@ -66,7 +72,8 @@ object Stats {
             companyRuleDays = selected.count { it.byCompanyRule },
             workMinutes = work.filterKeys { period == null || period.contains(it) }
                 .values.sumOf { WorkSplitter.minutes(it) },
-            overnights = selected.count { it.overnight },
+            overnights = Nights.dates(days).count { period == null || period.contains(it) },
+            shortDays = selected.count { it.type == DayType.NONE && !it.isManual && it.day.tourId == null },
         )
     }
 

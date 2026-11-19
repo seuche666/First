@@ -22,6 +22,17 @@ object Euro {
     /** Cent → „14,00“ (ohne Tausenderpunkt, ohne €-Zeichen). */
     fun format(cents: Long): String = "%d,%02d".format(cents / 100, cents % 100)
 
+    /** Cent → „1.234,56“ (mit Tausenderpunkt, ohne €-Zeichen). */
+    fun grouped(cents: Long): String {
+        val sign = if (cents < 0) "-" else ""
+        val abs = kotlin.math.abs(cents)
+        val euros = (abs / 100).toString().reversed().chunked(3).joinToString(".").reversed()
+        return "%s%s,%02d".format(sign, euros, abs % 100)
+    }
+
+    /** Cent → „1.234,56 €“. */
+    fun money(cents: Long): String = grouped(cents) + " €"
+
     /** Cent → „14,00 €“, null → „–“. */
     fun label(cents: Long?): String = cents?.let { format(it) + " €" } ?: "–"
 }
@@ -75,6 +86,5 @@ object ExpenseTables {
     }
 
     /** Anzahl der Übernachtungen im LKW im Jahr (für den Hinweis auf eine fehlende Übernachtungspauschale). */
-    fun overnights(days: List<ClassifiedDay>, year: Int): Int =
-        days.count { it.day.date.year == year && it.overnight }
+    fun overnights(days: List<ClassifiedDay>, year: Int): Int = Nights.dates(days).count { it.year == year }
 }

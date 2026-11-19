@@ -63,7 +63,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}, onOpenExpenses: (
     val context = LocalContext.current
     val savedName by vm.driverName.collectAsStateWithLifecycle()
     val pending by vm.pendingRestore.collectAsStateWithLifecycle()
-    val rules by vm.rules.collectAsStateWithLifecycle()
+    val reportReminder by vm.reportReminder.collectAsStateWithLifecycle()
     val work by vm.workSettings.collectAsStateWithLifecycle()
     val mapSettings by vm.mapSettings.collectAsStateWithLifecycle()
     var confirmDeleteTracks by remember { mutableStateOf(false) }
@@ -136,6 +136,19 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}, onOpenExpenses: (
                         Spacer(Modifier.width(8.dp))
                         Text("Spesentabelle öffnen")
                     }
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Erinnerung an die Reisekostenabrechnung", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Am 1. jedes Monats um 18 Uhr: „Reisekostenabrechnung für … erstellen?“",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(checked = reportReminder, onCheckedChange = vm::setReportReminder)
+                    }
                 }
             }
 
@@ -185,40 +198,26 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit = {}, onOpenExpenses: (
 
             item {
                 SectionCard(title = "So zählt die App", icon = Icons.AutoMirrored.Rounded.Rule) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "Eintägige Fahrten unter 8 Stunden als halben Tag zählen",
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                            Text(
-                                "Firmenregel. Achtung: Das Finanzamt erkennt einen halben Tag erst bei mehr als " +
-                                    "8 Stunden an. Betroffene Tage werden in Auswertung und Export markiert.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Switch(checked = rules.shortSingleDayAsHalf, onCheckedChange = vm::setShortSingleDayAsHalf)
-                    }
                     RuleRow("Voller Tag", "24 Stunden von zu Hause weg – ein Tag mitten in einer mehrtägigen Tour.")
-                    if (rules.shortSingleDayAsHalf) {
-                        RuleRow(
-                            "Halber Tag",
-                            "An- oder Abreisetag einer Tour, oder jede eintägige Fahrt (Firmenregel aktiv).",
-                        )
-                    } else {
-                        RuleRow("Halber Tag", "An- oder Abreisetag einer Tour, oder eine eintägige Fahrt mit mehr als 8 Stunden Abwesenheit.")
-                        RuleRow("Zählt nicht", "Eintägige Fahrt mit 8 Stunden oder weniger.")
-                    }
+                    RuleRow("Halber Tag", "An- oder Abreisetag einer Tour, oder eine eintägige Fahrt mit mehr als 8 Stunden Abwesenheit.")
+                    RuleRow(
+                        "Unter 8 Std.",
+                        "Eintägige Fahrt mit 8 Stunden oder weniger: zählt in Auswertung und Jahresexport (Steuer) " +
+                            "nicht und wird dort getrennt ausgewiesen.",
+                    )
+                    RuleRow(
+                        "Firmenregel",
+                        "Nur in der Reisekostenabrechnung für die Firma: Jede eintägige Fahrt bekommt den halben Satz, " +
+                            "auch unter 8 Stunden.",
+                    )
                     RuleRow(
                         "Arbeitszeit",
                         "Arbeitsbeginn und -ende sind nur für die Firma und ändern die Einordnung nicht.",
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Du kannst die Einordnung bei jedem Tag manuell ändern. Die App zählt nur Tage – " +
-                            "Steuerbeträge werden nicht berechnet. Im Zweifel frag deinen Steuerberater.",
+                        "Du kannst die Einordnung bei jedem Tag manuell ändern. Euro-Beträge rechnet die App mit " +
+                            "deiner Spesentabelle. Im Zweifel frag deinen Steuerberater.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

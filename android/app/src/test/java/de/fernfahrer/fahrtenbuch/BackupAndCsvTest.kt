@@ -9,11 +9,16 @@ import de.fernfahrer.fahrtenbuch.data.WorkSettings
 import de.fernfahrer.fahrtenbuch.data.WorkShiftEntity
 import de.fernfahrer.fahrtenbuch.domain.Classifier
 import de.fernfahrer.fahrtenbuch.domain.CountingRules
+import de.fernfahrer.fahrtenbuch.domain.EuroCalc
+import de.fernfahrer.fahrtenbuch.domain.ExpenseBook
+import de.fernfahrer.fahrtenbuch.domain.ExpenseRate
+import de.fernfahrer.fahrtenbuch.domain.ExpenseTable
 import de.fernfahrer.fahrtenbuch.domain.DayType
 import de.fernfahrer.fahrtenbuch.domain.Stats
 import de.fernfahrer.fahrtenbuch.domain.WorkSplitter
 import de.fernfahrer.fahrtenbuch.export.CsvExporter
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -46,6 +51,32 @@ class BackupAndCsvTest {
     fun sicherungHinUndZurueck() {
         val restored = Backup.fromJson(Backup.toJson(data))
         assertEquals(data, restored)
+    }
+
+    /** Format 8: von Hand geänderter Reiseanlass bleibt erhalten. */
+    @Test
+    fun sicherungFormat8MitReiseanlass() {
+        val withText = data.copy(
+            days = data.days.map { if (it.id == 1L) it.copy(travelText = "Abfahrt Fulda\nÜbernachtung bei Lyon") else it },
+        )
+        val json = Backup.toJson(withText)
+        assertEquals(8, org.json.JSONObject(json).getInt("version"))
+        val restored = Backup.fromJson(json)
+        assertEquals(withText, restored)
+        assertEquals("Abfahrt Fulda\nÜbernachtung bei Lyon", restored.days.first { it.id == 1L }.travelText)
+        assertNull(restored.days.first { it.id == 2L }.travelText)
+    }
+
+    /** Sicherung aus der Vorversion (Format 7, ohne Reiseanlass) wird weiter geladen. */
+    @Test
+    fun alteSicherungVersion7WirdGeladen() {
+        val root = org.json.JSONObject(Backup.toJson(data))
+        root.put("version", 7)
+        val days = root.getJSONArray("days")
+        for (i in 0 until days.length()) days.getJSONObject(i).remove("travelText")
+        val restored = Backup.fromJson(root.toString())
+        assertEquals(data.days, restored.days)
+        assertTrue(restored.days.all { it.travelText == null })
     }
 
     @Test(expected = BackupFormatException::class)
@@ -249,25 +280,57 @@ class BackupAndCsvTest {
 
     @Test
     fun csvMitArbeitszeitUebernachtungUndGeschaetztenKm() {
-        val rules = CountingRules(shortSingleDayAsHalf = true)
+        // Steuer: immer gesetzliche Regel (Firmenregel nur in der Reisekostenabrechnung)
+        val rules = CountingRules()
         val classified = Classifier.classifyAll(data.days, data.tours, rules)
         val work = WorkSplitter.byDate(data.shifts.filter { !it.running }, LocalDateTime.now())
         val summary = Stats.summarize(classified, null, work)
-        val csv = CsvExporter.build(2026, classified, summary, "Max", rules, work)
-        assertTrue(csv.startsWith("﻿"))
-        assertTrue(csv.contains("Zählregel eintägige Fahrten;Firmenregel:"))
-        assertTrue(csv.contains(";Übernachtung im LKW;Arbeitszeit;Arbeitszeit (Std.);km morgens;km abends;km gefahren;km anteilig geschätzt;Notiz"))
-        // Montag: Tour-Anreisetag, Übernachtung, Arbeit 05:30–24:00, km geschätzt
+        val book = ExpenseBook(
+            listOf(
+                ExpenseTable(
+                    2026, 800,
+                    mapOf("DE" to ExpenseRate("DE", 2800, 1400), "FR" to ExpenseRate("FR", null, 3600)),
+                ),
+            ),
+        )
+        val euro = EuroCalc.summarize(classified, book)
+        val csv = CsvExporter.build(2026, classified, summary, "Max", rules, work, euro, EuroCalc.perDay(classified, book))
+        assertTrue(csv.startsWith("\uFEFF"))
+        assertTrue(csv.contains("Zählregel eintägige Fahrten;Gesetzliche Regel:"))
         assertTrue(
             csv.contains(
-                "04.05.2026;Mo;Frankreich;FR;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;;ja;ja;" +
+                ";Tour;Übernachtung im LKW;Verpflegung €;Übernachtungspauschale €;Spesen gesamt €;Arbeitszeit;" +
+                    "Arbeitszeit (Std.);km morgens;km abends;km gefahren;km anteilig geschätzt;Notiz",
+            ),
+        )
+        assertFalse(csv.contains("Firmenregel"))
+        // Montag: Tour-Anreisetag (halber Satz Frankreich), Übernachtung, Arbeit 05:30–24:00, km geschätzt
+        assertTrue(
+            csv.contains(
+                "04.05.2026;Mo;Frankreich;FR;05:00;24:00;19:00;Halber Tag;Anreisetag der Tour;;ja;ja;36,00;;36,00;" +
                     "05:30–24:00;18:30;100;700;600;ja;\"Lyon; \"\"Kühl\"\"\"",
             ),
         )
-        // Dienstag: Rückreisetag (manuell voll), Arbeit 00:00–02:00 aus der Schicht über Mitternacht
+        // Dienstag: Rückreisetag (manuell voll), Pauschale für die Nacht Mo→Di, Arbeit 00:00–02:00
         assertTrue(csv.contains("05.05.2026;Di;Deutschland;DE;00:00;15:00;15:00;Voller Tag;Manuell geändert"))
-        assertTrue(csv.contains(";ja;;ja;;00:00–02:00;2:00;700;900;200;;"))
-        assertTrue(csv.contains("Übernachtungen im LKW;2"))
+        assertTrue(csv.contains(";ja;ja;;28,00;8,00;36,00;00:00–02:00;2:00;700;900;200;;"))
+        // Freitag: eintägig 4 Std. – zählt nicht, keine Spesen; die Nacht danach hat keinen erfassten Folgetag
+        assertTrue(csv.contains("08.05.2026;Fr;Deutschland;DE;08:00;12:00;4:00;Zählt nicht;Eintägige Fahrt bis 8 Stunden;;;ja;;;;"))
+        assertTrue(csv.contains("Übernachtungen im LKW;1"))
+        assertTrue(csv.contains("Eintägig unter 8 Std. (zählen nicht);1"))
+        assertTrue(csv.contains("Frankreich;0;1;36,00"))
+        assertTrue(csv.contains("Übernachtungspauschale;1 Nächte;;8,00"))
+        assertTrue(csv.contains("Gesamtsumme;;;72,00"))
+
+        // Fehlender Betrag: keine 0 €, sondern „fehlt“ und Summe unvollständig
+        val noFr = ExpenseBook(listOf(ExpenseTable(2026, 800, mapOf("DE" to ExpenseRate("DE", 2800, 1400)))))
+        val csv2 = CsvExporter.build(
+            2026, classified, summary, "Max", rules, work,
+            EuroCalc.summarize(classified, noFr), EuroCalc.perDay(classified, noFr),
+        )
+        assertTrue(csv2.contains(";Halber Tag;Anreisetag der Tour;;ja;ja;fehlt;;fehlt;"))
+        assertTrue(csv2.contains("Frankreich;0;1;fehlt"))
+        assertTrue(csv2.contains("Gesamtsumme;;;unvollständig – Beträge fehlen"))
         assertTrue(csv.contains("Arbeitszeit gesamt (Std.);20:30"))
     }
 }

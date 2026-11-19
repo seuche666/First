@@ -296,6 +296,76 @@ class MigrationTest {
         }
     }
 
+    /** Datenbank im Stand von App-Version mit Spesentabelle (Datenbank-Version 7) mit Einträgen. */
+    private fun SQLiteDatabase.fillVersion7() {
+        fillVersion6()
+        execSQL("INSERT INTO expense_years (year, overnightCents) VALUES (2026, 800)")
+        execSQL("INSERT INTO expense_rates (year, countryCode, fullDayCents, partialDayCents) VALUES (2026, 'NL', 3200, 2100)")
+    }
+
+    @Test
+    fun updateVonVersion7Auf8BehaeltAlleEintraegeUndSpesentabelle() {
+        createDatabase(dbName, 7) { fillVersion7() }
+        val room = openWithRoom(dbName)
+        try {
+            runBlocking {
+                val days = room.dao().getAllDays()
+                assertEquals(3, days.size)
+                // Bestehende Tage: automatischer Reiseanlass
+                assertTrue(days.all { it.travelText == null })
+                assertEquals("DE,NL,DE", days.first { it.id == 1L }.countries)
+                assertEquals(2, room.dao().getAllShifts().size)
+                assertEquals(50, room.trackDao().getAllChunks().single().pointCount)
+                assertEquals("Autohof", room.stopDao().getAllPlaces().single().name)
+                assertEquals(800L, room.expenseDao().getYear(2026)!!.overnightCents)
+                assertEquals(3200L, room.expenseDao().getRates(2026).single().fullDayCents)
+                // Reiseanlass lässt sich speichern und zurücksetzen
+                val repo = de.fernfahrer.fahrtenbuch.data.Repository(room, kotlinx.coroutines.flow.flowOf(CountingRules()))
+                val date = days.first().date
+                repo.setTravelText(date, "Abfahrt Fulda")
+                assertEquals("Abfahrt Fulda", room.dao().getDayByDate(date)!!.travelText)
+                repo.setTravelText(date, "  ")
+                assertNull(room.dao().getDayByDate(date)!!.travelText)
+            }
+            assertEquals(AppDatabase.VERSION, room.openHelper.readableDatabase.version)
+        } finally {
+            room.close()
+        }
+    }
+
+    /** Gegenprobe: Ohne die Migration 7 → 8 lässt Room die Datenbank nicht öffnen (und löscht nichts). */
+    @Test
+    fun ohneMigration7Auf8SchlaegtDasOeffnenFehl() {
+        createDatabase(dbName, 7) { fillVersion7() }
+        val room = openWithRoom(dbName, AppDatabase.MIGRATIONS.filter { it.endVersion <= 7 }.toTypedArray())
+        try {
+            val error = runCatching { runBlocking { room.dao().getAllDays() } }.exceptionOrNull()
+            assertTrue("Ohne Migration muss das Öffnen fehlschlagen", error is IllegalStateException)
+        } finally {
+            room.close()
+        }
+        SQLiteDatabase.openDatabase(context.getDatabasePath(dbName).path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            assertEquals(7, db.version)
+            db.rawQuery("SELECT COUNT(*) FROM days", null).use { c -> c.moveToFirst(); assertEquals(3, c.getInt(0)) }
+            db.rawQuery("SELECT COUNT(*) FROM expense_rates", null).use { c -> c.moveToFirst(); assertEquals(1, c.getInt(0)) }
+        }
+    }
+
+    @Test
+    fun sicherungVorUpdateVonVersion7EnthaeltSpesentabelle() {
+        createDatabase(AppDatabase.DB_NAME, 7) { fillVersion7() }
+        var publicBytes: ByteArray? = null
+        val result = PreMigrationBackup.runIfNeeded(context, AppDatabase.DB_NAME, AppDatabase.VERSION, "Max", null) { _, name, bytes ->
+            publicBytes = bytes
+            name
+        }
+        assertEquals(7, result!!.fromVersion)
+        val restored = Backup.fromJson(String(publicBytes!!))
+        assertEquals(3, restored.days.size)
+        assertTrue(restored.days.all { it.travelText == null })
+        assertEquals(800L, restored.expenseYears!!.single().year.overnightCents)
+    }
+
     /** Gegenprobe: Ohne die Migration 6 → 7 lässt Room die Datenbank nicht öffnen (und löscht nichts). */
     @Test
     fun ohneMigration6Auf7SchlaegtDasOeffnenFehl() {

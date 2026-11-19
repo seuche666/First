@@ -14,6 +14,8 @@ import de.fernfahrer.fahrtenbuch.data.BackupFiles
 import de.fernfahrer.fahrtenbuch.data.OvernightImport
 import de.fernfahrer.fahrtenbuch.data.SafBackupFolder
 import de.fernfahrer.fahrtenbuch.work.AutoBackup
+import de.fernfahrer.fahrtenbuch.work.ReportReminder
+import androidx.work.ExistingWorkPolicy
 import de.fernfahrer.fahrtenbuch.export.ExportFormat
 import de.fernfahrer.fahrtenbuch.export.YearExport
 import de.fernfahrer.fahrtenbuch.data.BackupData
@@ -27,6 +29,7 @@ import de.fernfahrer.fahrtenbuch.data.WorkSettings
 import de.fernfahrer.fahrtenbuch.data.WorkShiftEntity
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.CountingRules
+import de.fernfahrer.fahrtenbuch.domain.ExpenseBook
 import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.Milestones
 import de.fernfahrer.fahrtenbuch.domain.Period
@@ -110,7 +113,23 @@ class MainViewModel(
     fun setDriverName(name: String) = settings.setDriverName(name)
 
     val rules: StateFlow<CountingRules> = settings.rules
-    fun setShortSingleDayAsHalf(enabled: Boolean) = settings.setShortSingleDayAsHalf(enabled)
+
+    /** Spesentabellen aller Jahre für die Euro-Beträge. */
+    val expenseBook: StateFlow<ExpenseBook> = (app?.expenses?.book ?: flowOf(ExpenseBook(emptyList())))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ExpenseBook(emptyList()))
+
+    /** Angetippte Erinnerung: Monat, dessen Abrechnung geöffnet werden soll. */
+    val reportRequests: StateFlow<java.time.YearMonth?> = app?.reportRequests ?: MutableStateFlow(null)
+    fun consumeReportRequest() {
+        app?.reportRequests?.value = null
+    }
+
+    /** Erinnerung an die Reisekostenabrechnung am 1. des Monats. */
+    val reportReminder: StateFlow<Boolean> = settings.reportReminder
+    fun setReportReminder(enabled: Boolean) {
+        settings.setReportReminder(enabled)
+        app?.let { ReportReminder.schedule(it, enabled, ExistingWorkPolicy.REPLACE) }
+    }
 
     val workSettings: StateFlow<WorkSettings> = settings.work
     fun setWorkSettings(value: WorkSettings) {
@@ -325,7 +344,7 @@ class MainViewModel(
             try {
                 val file = YearExport.createFile(
                     appContext, year, format, days.value ?: emptyList(), repo.getAllShifts(),
-                    settings.driverName.value, settings.rules.value,
+                    settings.driverName.value, settings.rules.value, app?.expenses?.getBook() ?: expenseBook.value,
                 )
                 Share.shareFile(appContext, file, YearExport.mimeType(format), "Jahresübersicht $year teilen")
             } catch (e: Exception) {
@@ -428,7 +447,6 @@ class MainViewModel(
                 milestoneState.silenceNext()
                 repo.replaceAll(data)
                 if (data.driverName.isNotBlank()) settings.setDriverName(data.driverName)
-                data.rules?.let { settings.setShortSingleDayAsHalf(it.shortSingleDayAsHalf) }
                 data.workSettings?.let { settings.setWorkSettings(it) }
                 data.mapSettings?.let { settings.setMapSettings(it) }
                 data.autoBackup?.let { ab ->

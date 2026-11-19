@@ -49,6 +49,7 @@ object OldDatabaseReader {
                                 kmInterpolated = c.int("kmInterpolated")?.let { it != 0 } ?: false,
                                 timesAuto = c.int("timesAuto")?.let { it != 0 } ?: false,
                                 countries = c.string("countries").orEmpty(),
+                                travelText = c.string("travelText"),
                             ),
                         )
                     }

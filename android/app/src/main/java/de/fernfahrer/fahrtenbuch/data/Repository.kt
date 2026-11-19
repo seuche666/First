@@ -49,6 +49,8 @@ class Repository(
     suspend fun getRunningShift() = dao.getRunningShift()
     suspend fun getShift(id: Long) = dao.getShift(id)
     suspend fun getAllShifts() = dao.getAllShifts()
+    suspend fun getAllDays() = dao.getAllDays()
+    suspend fun getAllTours() = dao.getAllTours()
 
     /**
      * Speichert einen Tag.
@@ -341,6 +343,13 @@ class Repository(
         syncRunningWork(at)
         applyDetectedCountry(at.toLocalDate(), code)
     }
+
+    /**
+     * Von Hand geänderter Text „Reiseanlass und Reiseweg“ (Reisekostenabrechnung); leer oder null =
+     * wieder automatisch.
+     */
+    suspend fun setTravelText(date: LocalDate, text: String?) =
+        dao.setTravelText(date, text?.trim()?.takeIf { it.isNotEmpty() })
 
     /** Land, in dem man zuletzt war (Ende des jüngsten Tages bis [date]). */
     suspend fun lastCountryUpTo(date: LocalDate): String? =

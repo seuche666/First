@@ -157,7 +157,7 @@ class ExpenseTableTest {
         val exported = repo.exportData().copy(driverName = "Max Muster")
         val json = Backup.toJson(exported)
         assertEquals(Backup.VERSION, org.json.JSONObject(json).getInt("version"))
-        assertEquals(7, Backup.VERSION)
+        assertEquals(8, Backup.VERSION)
         val restored = Backup.fromJson(json)
         assertEquals(exported, restored)
         assertEquals("Max Muster", restored.driverName)

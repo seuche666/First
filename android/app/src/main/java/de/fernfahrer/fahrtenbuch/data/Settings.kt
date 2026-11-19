@@ -18,17 +18,27 @@ class Settings(context: Context) {
         prefs.edit().putString(KEY_DRIVER, name).apply()
     }
 
-    private val _rules = MutableStateFlow(
-        CountingRules(shortSingleDayAsHalf = prefs.getBoolean(KEY_SHORT_AS_HALF, false)),
-    )
+    /**
+     * Zählregeln für Auswertung und Jahresexport (Steuer): immer die gesetzliche Regel. Die Firmenregel
+     * (eintägig bis 8 Std. = halber Tag) gilt nur in der Reisekostenabrechnung
+     * ([de.fernfahrer.fahrtenbuch.export.TravelReportSource.COMPANY_RULES]) und ist nicht mehr einstellbar.
+     */
+    val rules: StateFlow<CountingRules> = MutableStateFlow(CountingRules()).asStateFlow()
 
-    /** Aktive Zählregeln (z. B. Firmenregel für kurze eintägige Fahrten). */
-    val rules: StateFlow<CountingRules> = _rules.asStateFlow()
+    private val _reportReminder = MutableStateFlow(prefs.getBoolean(KEY_REPORT_REMINDER, true))
 
-    fun setShortSingleDayAsHalf(enabled: Boolean) {
-        _rules.value = _rules.value.copy(shortSingleDayAsHalf = enabled)
-        prefs.edit().putBoolean(KEY_SHORT_AS_HALF, enabled).apply()
+    /** Benachrichtigung am 1. des Monats „Reisekostenabrechnung erstellen?“. */
+    val reportReminder: StateFlow<Boolean> = _reportReminder.asStateFlow()
+
+    fun setReportReminder(enabled: Boolean) {
+        _reportReminder.value = enabled
+        prefs.edit().putBoolean(KEY_REPORT_REMINDER, enabled).apply()
     }
+
+    /** Monat (z. B. „2026-10“), für den zuletzt an die Abrechnung erinnert wurde. */
+    var lastReportReminder: String?
+        get() = prefs.getString(KEY_REPORT_REMINDER_LAST, null)
+        set(value) = prefs.edit().putString(KEY_REPORT_REMINDER_LAST, value).apply()
 
     private val _work = MutableStateFlow(
         WorkSettings(
@@ -161,7 +171,8 @@ class Settings(context: Context) {
         const val MIN_HOURS = 1
         const val MAX_HOURS = 24
         private const val KEY_DRIVER = "fahrer_name"
-        private const val KEY_SHORT_AS_HALF = "eintaegig_kurz_als_halb"
+        private const val KEY_REPORT_REMINDER = "abrechnung_erinnerung"
+        private const val KEY_REPORT_REMINDER_LAST = "abrechnung_erinnerung_monat"
         private const val KEY_REMINDER = "erinnerung_an"
         private const val KEY_REMINDER_HOURS = "erinnerung_stunden"
         private const val KEY_GPS = "gps_land"

@@ -6,6 +6,9 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import de.fernfahrer.fahrtenbuch.domain.ClassifiedDay
 import de.fernfahrer.fahrtenbuch.domain.CountingRules
+import de.fernfahrer.fahrtenbuch.domain.DayEuro
+import de.fernfahrer.fahrtenbuch.domain.Euro
+import de.fernfahrer.fahrtenbuch.domain.EuroSummary
 import de.fernfahrer.fahrtenbuch.domain.Countries
 import de.fernfahrer.fahrtenbuch.domain.Format
 import de.fernfahrer.fahrtenbuch.domain.Summary
@@ -41,6 +44,8 @@ object PdfExporter {
         driverName: String,
         rules: CountingRules = CountingRules(),
         work: Map<LocalDate, List<WorkPortion>> = emptyMap(),
+        euro: EuroSummary? = null,
+        perDay: Map<LocalDate, DayEuro> = emptyMap(),
     ) {
         val doc = PdfDocument()
         val w = Writer(doc)
@@ -48,7 +53,7 @@ object PdfExporter {
         // Kopf
         w.text("Fahrtenbuch – Jahresübersicht $year", paint(20f, bold = true, color = accent), 26f)
         val sub = buildString {
-            if (driverName.isNotBlank()) append("Fahrer: $driverName  ·  ")
+            if (driverName.isNotBlank()) append("Name: $driverName  ·  ")
             append("Erstellt am ${Format.date(LocalDate.now())}")
         }
         w.text(sub, paint(10f, color = muted), 16f)
@@ -77,41 +82,68 @@ object PdfExporter {
         w.text("Davon im Ausland: ${summary.abroadDays} Tage in ${summary.abroad.size} Ländern", body, 16f)
         w.text("Übernachtungen im LKW: ${summary.overnights}", body, 16f)
         w.text("Gefahrene Kilometer: ${Format.km(summary.km)}", body, 16f)
-        if (summary.companyRuleDays > 0) {
-            w.text(
-                "Davon nur nach Firmenregel halb (eintägig, 8 Std. oder weniger): ${summary.companyRuleDays} Tage †",
-                body, 16f,
-            )
+        if (summary.shortDays > 0) {
+            w.text("Eintägig unter 8 Std. (zählen nicht): ${summary.shortDays} Tage", body, 16f)
         }
-        if (summary.notCounted > 0) {
-            w.text("Nicht gezählt (eintägig bis 8 Std. oder manuell): ${summary.notCounted} Tage", body, 16f)
+        val manualNone = summary.notCounted - summary.shortDays
+        if (manualNone > 0) {
+            w.text("Von Hand auf „zählt nicht“ gesetzt: $manualNone Tage", body, 16f)
         }
         if (summary.workMinutes > 0) {
             w.text("Erfasste Arbeitszeit (für die Firma): ${Format.duration(summary.workMinutes)}", body, 16f)
         }
-        w.space(4f)
-        w.text("Hinweis: Die App zählt nur Tage. Steuerbeträge werden nicht berechnet.", paint(9f, color = muted), 14f)
         w.space(14f)
+
+        // Euro-Beträge laut Spesentabelle
+        if (euro != null) {
+            w.text("Spesen in Euro (laut Spesentabelle)", paint(13f, bold = true), 20f)
+            val eCols = floatArrayOf(235f, 90f, 90f, 100f)
+            w.row(listOf("Land", "Volle Tage", "Halbe Tage", "Betrag €"), eCols, headPaint, rightFrom = 1)
+            w.line()
+            euro.countries.forEachIndexed { i, c ->
+                w.row(
+                    listOf(Countries.name(c.countryCode), "${c.fullDays}", "${c.halfDays}", c.totalCents?.let(Euro::grouped) ?: "fehlt"),
+                    eCols, body, rightFrom = 1, background = if (i % 2 == 1) zebra else null,
+                )
+            }
+            w.row(
+                listOf("Übernachtungspauschale", "${euro.nights} Nächte", "", euro.overnightCents?.let(Euro::grouped) ?: "fehlt"),
+                eCols, body, rightFrom = 1,
+            )
+            w.line()
+            w.row(listOf("Verpflegung gesamt", "", "", euro.mealCents?.let(Euro::grouped) ?: "fehlt"), eCols, body, rightFrom = 1)
+            w.row(listOf("Übernachtung gesamt", "", "", euro.overnightCents?.let(Euro::grouped) ?: "fehlt"), eCols, body, rightFrom = 1)
+            w.row(
+                listOf("Gesamtsumme", "", "", euro.totalCents?.let(Euro::money) ?: "unvollständig"),
+                eCols, paint(10.5f, bold = true), rightFrom = 1,
+            )
+            if (!euro.complete) {
+                w.text(
+                    "Unvollständig: Für mindestens einen Betrag fehlt der Eintrag in der Spesentabelle („fehlt“). " +
+                        "Es wurde nichts mit 0 € gerechnet.",
+                    paint(9f, color = Color.rgb(180, 30, 30)), 14f,
+                )
+            }
+            w.space(14f)
+        }
 
         // Einzelne Tage
         w.text("Einzelne Tage", paint(13f, bold = true), 20f)
-        // Spalten: Datum | Land | Abwesend | Dauer | Arbeitszeit | Einordnung | Ü | km | Notiz
-        val dayCols = floatArrayOf(68f, 70f, 60f, 38f, 82f, 64f, 16f, 40f, CONTENT_W - 438f)
-        val dayHead = listOf("Datum", "Land", "Abwesend", "Dauer", "Arbeitszeit", "Einordnung", "Ü", "km", "Notiz")
+        // Spalten: Datum | Land | Abwesend | Dauer | Arbeitszeit | Einordnung | Ü | km | Spesen € | Notiz
+        val dayCols = floatArrayOf(64f, 62f, 56f, 34f, 78f, 56f, 14f, 38f, 46f, CONTENT_W - 448f)
+        val dayHead = listOf("Datum", "Land", "Abwesend", "Dauer", "Arbeitszeit", "Einordnung", "Ü", "km", "Spesen €", "Notiz")
         val small = paint(8.5f)
         val smallHead = paint(8.5f, bold = true, color = muted)
         w.onNewPage = {
-            w.row(dayHead, dayCols, smallHead, rightAt = setOf(7))
+            w.row(dayHead, dayCols, smallHead, rightAt = setOf(7, 8))
             w.line()
         }
         w.onNewPage!!.invoke()
         var anyManual = false
-        var anyCompanyRule = false
         var anyEstimated = false
         days.sortedBy { it.day.date }.forEachIndexed { i, c ->
             val d = c.day
             if (c.isManual) anyManual = true
-            if (c.byCompanyRule) anyCompanyRule = true
             if (d.kmInterpolated && d.distanceKm != null) anyEstimated = true
             val workText = WorkSplitter.label(work[d.date])
             w.row(
@@ -121,18 +153,31 @@ object PdfExporter {
                     "${Format.time(d.startMinute)}–${Format.time(d.endMinute)}",
                     "%d:%02d h".format(d.absenceMinutes / 60, d.absenceMinutes % 60),
                     workText,
-                    c.type.label + (if (c.isManual) " *" else "") + (if (c.byCompanyRule) " †" else ""),
+                    c.type.label + (if (c.isManual) " *" else ""),
                     if (c.overnight) "Ü" else "",
                     d.distanceKm?.let { (if (d.kmInterpolated) "~" else "") + Format.number(it) } ?: "",
+                    perDay[d.date]?.let { e ->
+                        when {
+                            e.missing -> "fehlt"
+                            e.mealCents == null && !e.hasNight -> ""
+                            else -> Euro.grouped(e.totalCents ?: 0)
+                        }
+                    } ?: "",
                     d.note.replace('\n', ' '),
                 ),
-                dayCols, small, rightAt = setOf(7), background = if (i % 2 == 1) zebra else null, rowHeight = 13f,
+                dayCols, small, rightAt = setOf(7, 8), background = if (i % 2 == 1) zebra else null, rowHeight = 13f,
             )
         }
         if (days.isEmpty()) w.text("Keine Einträge in diesem Jahr.", small, 14f)
-        if (anyManual || anyCompanyRule || anyEstimated || summary.overnights > 0) w.space(6f)
+        if (anyManual || anyEstimated || summary.overnights > 0 || euro != null) w.space(6f)
         if (summary.overnights > 0) {
-            w.text("Ü = Übernachtung im LKW", paint(8.5f, color = muted), 12f)
+            w.text(
+                "Ü = Übernachtung im LKW in der Nacht nach diesem Tag (die Pauschale steht beim Folgetag)",
+                paint(8.5f, color = muted), 12f,
+            )
+        }
+        if (euro != null) {
+            w.text("Spesen € = Verpflegung und Übernachtungspauschale des Tages laut Spesentabelle", paint(8.5f, color = muted), 12f)
         }
         if (anyEstimated) {
             w.text(
@@ -142,13 +187,6 @@ object PdfExporter {
         }
         if (anyManual) {
             w.text("* Einordnung manuell geändert", paint(8.5f, color = muted), 12f)
-        }
-        if (anyCompanyRule) {
-            w.text(
-                "† Halber Tag nach Firmenregel: eintägige Fahrt mit 8 Stunden oder weniger " +
-                    "(Finanzamt: erst bei mehr als 8 Stunden)",
-                paint(8.5f, color = muted), 12f,
-            )
         }
 
         w.finish()
